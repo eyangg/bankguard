@@ -14,14 +14,17 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id           INTEGER PRIMARY KEY,
     display_name TEXT NOT NULL,
-    demo_token   TEXT NOT NULL UNIQUE
+    demo_token   TEXT NOT NULL UNIQUE,
+    role         TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'admin'))
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
     id            INTEGER PRIMARY KEY,
     owner_user_id INTEGER NOT NULL REFERENCES users(id),
     account_no    TEXT NOT NULL UNIQUE,
-    balance_krw   INTEGER NOT NULL CHECK (balance_krw >= 0)
+    balance_krw   INTEGER NOT NULL CHECK (balance_krw >= 0),
+    status        TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'FROZEN')),
+    nickname      TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS transfers (

@@ -23,3 +23,6 @@ MAX_TRANSFER_KRW = 10_000_000
 
 # 공개 서버에서 허용하는 모드. 취약 비교 모드는 여기에 절대 추가하지 않는다.
 PUBLIC_MODES = frozenset({"secure"})
+
+# 테스트·검사 코드에서만 만들 수 있는 취약 비교 모드. create_app이 임시 DB 경로를 강제한다.
+LAB_MODES = frozenset({"vulnerable"})

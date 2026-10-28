@@ -13,7 +13,8 @@
 |---|---|---|
 | 1 | 개발 환경, 프로젝트 골격, `GET /health`, Streamlit 첫 화면, 스모크 테스트 | 완료 (Linux·Windows 검증) |
 | 2 | SQLite 스키마·시드, 안전 송금 API, 감사 로그 기록 | 완료 (Windows pytest 64 passed, 실서버 확인) / 탐지 규칙 DET-01은 DAY 7 예정 |
-| 3~4 | 보안 시나리오 SC-01~04, 취약/안전 격리 비교 | 예정 |
+| 3 | v1.2 스키마(role/status/nickname)·지급정지·별칭 변경 API, 취약/안전 격리 모드, SC-01·SC-05·SC-06 판정 | 완료 (Windows pytest 112 passed, 실서버 확인) |
+| 4 | SC-03 동시 송금 경쟁 조건, SC-04 멱등성, 5종 공통 실행 | 예정 |
 | 5 | Semgrep 로컬 규칙·결과 파싱 | 예정 |
 | 6~7 | Streamlit 4탭 대시보드, 전후 비교 | 예정 |
 | 8 | 안정화·문서·시연 | 예정 |

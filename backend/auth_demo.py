@@ -38,6 +38,7 @@ def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
 class AuthUser:
     user_id: int
     token_fp: str
+    role: str
 
 
 def current_user(
@@ -55,4 +56,28 @@ def current_user(
             detail="토큰 없음" if not x_demo_token else "토큰 불일치",
         )
         raise HTTPException(status_code=401, detail="인증 토큰이 없거나 올바르지 않습니다.")
-    return AuthUser(user_id=user["id"], token_fp=fp)
+    return AuthUser(user_id=user["id"], token_fp=fp, role=user["role"])
+
+
+def require_admin(
+    request: Request,
+    user: AuthUser = Depends(current_user),
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> AuthUser:
+    """관리 기능 전용 역할 검사(SC-05). 관리 라우터 전체에 기본값으로 걸어 '기본 거부'를 만든다.
+
+    화면에 버튼이 안 보이는 것은 통제가 아니므로 role은 항상 서버에서 확인한다.
+    """
+    if user.role != "admin":
+        raw = request.path_params.get("account_id")
+        audit.record(
+            conn,
+            audit.ACCESS_DENIED,
+            403,
+            actor_user_id=user.user_id,
+            token_fp=user.token_fp,
+            target_account_id=int(raw) if isinstance(raw, str) and raw.isdigit() else None,
+            detail="관리자 전용 기능 호출 시도",
+        )
+        raise HTTPException(status_code=403, detail="관리자만 사용할 수 있는 기능입니다.")
+    return user

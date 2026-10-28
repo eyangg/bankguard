@@ -22,6 +22,25 @@ class TransactionOut(BaseModel):
     created_at: str
 
 
+class AccountNicknameOut(BaseModel):
+    id: int
+    account_no: str
+    nickname: str | None
+
+
+class NicknameUpdate(BaseModel):
+    """별칭 변경 요청. 허용 필드는 nickname 하나뿐이며 그 외 필드는 422 (SC-06 안전 기준)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: StrictStr = Field(min_length=1, max_length=20)
+
+
+class FreezeOut(BaseModel):
+    account_id: int
+    status: Literal["ACTIVE", "FROZEN"]
+
+
 class TransferIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -110,11 +110,24 @@ def execute_transfer(
                 True, s_mask, r_mask,
             )
 
+        # 지급정지 확인과 잔액 확인을 차감과 같은 문장에 묶는다. 읽은 뒤 정지되는 경우(TOCTOU)도 막는다.
         debited = conn.execute(
-            "UPDATE accounts SET balance_krw = balance_krw - ? WHERE id = ? AND balance_krw >= ?",
+            "UPDATE accounts SET balance_krw = balance_krw - ?"
+            " WHERE id = ? AND balance_krw >= ? AND status = 'ACTIVE'",
             (amount_krw, from_account_id, amount_krw),
         )
         if debited.rowcount != 1:
+            current = conn.execute(
+                "SELECT status FROM accounts WHERE id = ?", (from_account_id,)
+            ).fetchone()
+            if current is not None and current["status"] != "ACTIVE":
+                raise TransferRejected(
+                    409,
+                    audit.TRANSFER_REJECTED,
+                    "출금 계좌가 지급정지 상태입니다.",
+                    from_account_id,
+                    f"지급정지 계좌 출금 시도 {s_mask}",
+                )
             raise TransferRejected(
                 409,
                 audit.TRANSFER_REJECTED,

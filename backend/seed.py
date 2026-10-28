@@ -13,6 +13,7 @@ class SeedUser(NamedTuple):
     user_id: int
     display_name: str
     demo_token: str
+    role: str  # 'customer' | 'admin' (v1.2)
 
 
 class SeedAccount(NamedTuple):
@@ -23,9 +24,11 @@ class SeedAccount(NamedTuple):
 
 
 SEED_USERS: tuple[SeedUser, ...] = (
-    SeedUser(1, "가상 고객 A", "demo-token-a"),
-    SeedUser(2, "가상 고객 B", "demo-token-b"),
-    SeedUser(3, "가상 고객 C", "demo-token-c"),
+    SeedUser(1, "가상 고객 A", "demo-token-a", "customer"),
+    SeedUser(2, "가상 고객 B", "demo-token-b", "customer"),
+    SeedUser(3, "가상 고객 C", "demo-token-c", "customer"),
+    # v1.2: 가상 운영자(계좌 없음). 지급정지 같은 관리 기능 호출 권한 검사(SC-05)의 양성 대조에 쓴다.
+    SeedUser(9, "가상 운영자", "demo-token-admin", "admin"),
 )
 
 SEED_ACCOUNTS: tuple[SeedAccount, ...] = (
@@ -46,7 +49,7 @@ def seed_database(conn: sqlite3.Connection) -> bool:
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.executemany(
-            "INSERT INTO users (id, display_name, demo_token) VALUES (?, ?, ?)",
+            "INSERT INTO users (id, display_name, demo_token, role) VALUES (?, ?, ?, ?)",
             SEED_USERS,
         )
         conn.executemany(

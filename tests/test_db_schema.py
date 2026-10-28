@@ -1,4 +1,4 @@
-"""DAY 2 항목 1: 스키마 제약과 시드 데이터 검증."""
+"""스키마 제약과 시드 데이터 검증 (DAY 2 + v1.2 role/status/nickname)."""
 from __future__ import annotations
 
 import sqlite3
@@ -18,22 +18,27 @@ def conn(db_path):
 
 
 def test_seed_matches_spec(conn):
-    users = conn.execute("SELECT id, display_name, demo_token FROM users ORDER BY id").fetchall()
+    users = conn.execute("SELECT id, display_name, demo_token, role FROM users ORDER BY id").fetchall()
     assert [tuple(u) for u in users] == [
-        (1, "가상 고객 A", "demo-token-a"),
-        (2, "가상 고객 B", "demo-token-b"),
-        (3, "가상 고객 C", "demo-token-c"),
+        (1, "가상 고객 A", "demo-token-a", "customer"),
+        (2, "가상 고객 B", "demo-token-b", "customer"),
+        (3, "가상 고객 C", "demo-token-c", "customer"),
+        (9, "가상 운영자", "demo-token-admin", "admin"),
     ]
     accounts = conn.execute(
-        "SELECT id, owner_user_id, account_no, balance_krw FROM accounts ORDER BY id"
+        "SELECT id, owner_user_id, account_no, balance_krw, status, nickname FROM accounts ORDER BY id"
     ).fetchall()
     assert [tuple(a) for a in accounts] == [
-        (101, 1, "DEMO-101", 1_000_000),
-        (102, 2, "DEMO-102", 500_000),
-        (103, 3, "DEMO-103", 2_000_000),
+        (101, 1, "DEMO-101", 1_000_000, "ACTIVE", None),
+        (102, 2, "DEMO-102", 500_000, "ACTIVE", None),
+        (103, 3, "DEMO-103", 2_000_000, "ACTIVE", None),
     ]
-    assert [tuple(a) for a in accounts] == [tuple(a) for a in SEED_ACCOUNTS]
-    assert len(SEED_USERS) == 3
+    assert [tuple(a)[:4] for a in accounts] == [tuple(a) for a in SEED_ACCOUNTS]
+    assert len(SEED_USERS) == 4
+
+
+def test_admin_user_has_no_account(conn):
+    assert conn.execute("SELECT COUNT(*) FROM accounts WHERE owner_user_id = 9").fetchone()[0] == 0
 
 
 def test_all_four_tables_exist(conn):
@@ -51,7 +56,7 @@ def test_init_db_is_idempotent_and_keeps_existing_balances(db_path):
     c = connect(db_path)
     try:
         assert c.execute("SELECT balance_krw FROM accounts WHERE id = 101").fetchone()[0] == 777
-        assert c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 3
+        assert c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 4
     finally:
         c.close()
 
@@ -99,3 +104,13 @@ def test_audit_log_columns_match_spec(conn):
         "id", "created_at", "event_type", "actor_user_id",
         "token_fingerprint", "target_account_id", "http_status", "detail",
     ]
+
+
+def test_invalid_role_rejected_by_check(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE users SET role = 'superuser' WHERE id = 1")
+
+
+def test_invalid_account_status_rejected_by_check(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("UPDATE accounts SET status = 'CLOSED' WHERE id = 101")

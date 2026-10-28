@@ -40,7 +40,8 @@ def test_public_entrypoint_is_secure_mode_only():
 
 @pytest.mark.parametrize("bad_mode", ["vulnerable", "insecure", "", "SECURE"])
 def test_factory_rejects_unsupported_modes(bad_mode):
-    # DAY 1 기준: secure 외의 모드는 거절. (DAY 3에 테스트 전용 경로로 vulnerable 추가 예정)
+    # 알 수 없는 모드는 거절. "vulnerable"은 DAY 3부터 허용되지만 임시 DB 경로가 없으면 역시 거절된다
+    # (자세한 격리 규칙은 tests/test_lab_isolation.py).
     with pytest.raises(ValueError):
         create_app(mode=bad_mode)
 
