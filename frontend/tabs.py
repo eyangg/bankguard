@@ -1,6 +1,14 @@
-"""대시보드 탭 렌더링. 표시하는 모든 결과는 세션에 저장된 '실제 실행 결과'뿐이며, 예시 PASS/FAIL을 넣지 않는다."""
+"""대시보드 탭 렌더링. 표시하는 모든 결과는 세션에 저장된 '실제 실행 결과'뿐이며, 예시 PASS/FAIL을 넣지 않는다.
+
+검사 실행 방식(중복 클릭 방지, 명세 15장)
+1. 버튼은 on_click 콜백으로 '작업 예약(job)'만 한다 — 콜백은 스크립트 재실행 전에 돈다.
+2. 재실행된 스크립트가 화면을 모두 그리되, 작업이 예약돼 있는 동안 모든 실행 버튼을 비활성화한다.
+3. 스크립트 맨 끝에서 예약된 작업을 실제로 실행하고(진행 막대는 화면 위쪽 status_box에 표시),
+   끝나면 st.rerun()으로 결과를 반영한다.
+"""
 from __future__ import annotations
 
+import json
 import logging
 
 import streamlit as st
@@ -8,7 +16,8 @@ import streamlit as st
 from backend.config import API_BASE_URL
 from backend.seed import SEED_ACCOUNTS, SEED_USERS
 from frontend import helpers, services
-from scanners import sast_runner
+from scanners import artifacts, report, sast_runner
+from scanners.compare import compare_runs, coverage_rows
 
 logger = logging.getLogger("bankguard.frontend")
 
@@ -18,6 +27,108 @@ NOT_RUN = "아직 검사를 실행하지 않았습니다."
 def init_state() -> None:
     st.session_state.setdefault("api_results", {})  # {"secure": 결과 dict, "vulnerable": 결과 dict}
     st.session_state.setdefault("sast_run", None)
+    st.session_state.setdefault("det01", None)
+    st.session_state.setdefault("job", None)  # 예약된 작업 {"action": ..., "mode": ...}
+    st.session_state.setdefault("notice", None)  # (종류, 문구): 끝난 작업의 성공/오류 알림
+
+
+# ============================================================================================
+# 작업 예약·실행 (중복 클릭 방지)
+# ============================================================================================
+
+def _busy() -> bool:
+    return st.session_state.get("job") is not None
+
+
+def _start_job(action: str, mode: str | None = None) -> None:
+    st.session_state["job"] = {"action": action, "mode": mode}
+    st.session_state["notice"] = None
+
+
+def run_button(label: str, key: str, action: str, mode: str | None = None) -> None:
+    st.button(label, type="primary", key=key, on_click=_start_job, args=(action, mode), disabled=_busy())
+    if _busy():
+        st.caption("다른 검사가 실행 중입니다. 끝날 때까지 실행 버튼이 비활성화됩니다.")
+
+
+def render_notice(status_box) -> None:
+    with status_box:
+        if _busy():
+            st.info("검사를 실행하고 있습니다. 끝날 때까지 실행 버튼이 비활성화됩니다.")
+        notice = st.session_state.get("notice")
+        if notice:
+            kind, text = notice
+            getattr(st, kind)(text)
+
+
+def _save(kind: str, data: dict) -> bool:
+    """결과를 artifacts/에 저장한다. 실패해도 화면 표시는 계속한다."""
+    try:
+        artifacts.save_json(kind, data)
+        return True
+    except OSError:
+        logger.exception("결과 저장 실패: %s", kind)
+        return False
+
+
+def execute_pending_job(status_box) -> None:
+    job = st.session_state.get("job")
+    if not job:
+        return
+    action, mode = job["action"], job.get("mode")
+    progress = status_box.progress(0.0, text="검사 준비 중...")
+
+    def on_progress(done: int, total: int, name: str) -> None:
+        text = "검사 완료" if name == "완료" else f"검사 중 ({min(done + 1, total)}/{total}): {name}"
+        progress.progress(min(done / total, 1.0), text=text)
+
+    saved = True
+    try:
+        if action == "api":
+            result = services.run_api_checks(mode, on_progress)
+            st.session_state["api_results"][mode] = result
+            saved = _save(f"api_{mode}", result)
+            message = f"{helpers.MODE_LABELS[mode]} 검사를 마쳤습니다."
+        elif action == "sast":
+            progress.progress(0.3, text="Semgrep 실행 중... (대상 3곳, 수 초~수십 초)")
+            st.session_state["sast_run"] = services.run_static_analysis()
+            saved = _save("sast", st.session_state["sast_run"])
+            message = "정적 분석을 마쳤습니다."
+        elif action == "det":
+            progress.progress(0.3, text="DET-01 탐지 규칙을 검증하는 중...")
+            st.session_state["det01"] = services.run_detection_check()
+            saved = _save("det01", st.session_state["det01"])
+            message = "DET-01 탐지 검증을 마쳤습니다."
+        elif action == "full":
+            bundle = services.run_full_check(on_progress)
+            st.session_state["api_results"]["vulnerable"] = bundle["api_vulnerable"]
+            st.session_state["api_results"]["secure"] = bundle["api_secure"]
+            st.session_state["sast_run"] = bundle["sast"]
+            st.session_state["det01"] = bundle["det01"]
+            saved = all(_save(kind, data) for kind, data in bundle.items())
+            message = "전체 검사(취약 → 안전 → 정적 분석 → DET-01)를 마쳤습니다."
+        else:
+            raise ValueError(f"알 수 없는 작업: {action}")
+        st.session_state["notice"] = (
+            ("success", f"{message} 결과를 artifacts/에 저장했습니다.")
+            if saved
+            else ("warning", f"{message} 다만 artifacts/ 저장에 실패했습니다(화면 표시는 정상).")
+        )
+    except Exception:  # 상세 예외(경로 등)는 화면에 내지 않고 콘솔 로그에 남긴다
+        logger.exception("검사 실행 실패: %s", action)
+        if action == "api":
+            st.session_state["api_results"].pop(mode, None)
+            text = "검사를 실행하지 못했습니다(ERROR). 터미널 로그를 확인하세요. 이 상태는 보안 위반(FAIL)이 아닙니다."
+        elif action == "sast":
+            st.session_state["sast_run"] = None
+            text = "정적 분석을 실행하지 못했습니다(SCAN_ERROR). 터미널 로그를 확인하세요."
+        else:
+            text = "검사를 실행하지 못했습니다(ERROR). 터미널 로그를 확인하세요. 이 상태는 보안 위반(FAIL)이 아닙니다."
+        st.session_state["notice"] = ("error", text)
+    finally:
+        st.session_state["job"] = None
+        progress.empty()
+    st.rerun()
 
 
 # ============================================================================================
@@ -99,7 +210,8 @@ def render_overview() -> None:
     st.subheader("최근 검사 실행 요약")
     api_results = st.session_state["api_results"]
     sast_run = st.session_state["sast_run"]
-    if not api_results and sast_run is None:
+    det01 = st.session_state["det01"]
+    if not api_results and sast_run is None and det01 is None:
         st.info(NOT_RUN)
         return
     columns = st.columns(3)
@@ -126,6 +238,11 @@ def render_overview() -> None:
             sub[0].metric("탐지(검토 필요)", sast_run["total_findings"])
             sub[1].metric("스캔 오류", sast_run["scan_errors"])
             st.caption(f"실행 {helpers.format_kst(sast_run['run_at'])}")
+    if det01 is not None:
+        st.caption(
+            f"감사 로그 탐지 DET-01: **{det01['status']}** — {det01['observed']} "
+            f"(실행 {helpers.format_kst(det01['run_at'])})"
+        )
 
 
 def _account_rows(live: dict[int, list[dict]] | None) -> list[dict]:
@@ -136,7 +253,7 @@ def _account_rows(live: dict[int, list[dict]] | None) -> list[dict]:
     for user in SEED_USERS:
         role = "운영자" if user.role == "admin" else "고객"
         if user.role == "admin":
-            rows.append({"이름": user.display_name, "역할": role, "계좌 ID": "-", "계좌번호": "계좌 없음",  # 열 타입을 문자열로 통일
+            rows.append({"이름": user.display_name, "역할": role, "계좌 ID": "-", "계좌번호": "계좌 없음",
                          "잔액": "-", "기준": "-"})
             continue
         if live is not None:
@@ -162,7 +279,9 @@ def render_api_tab() -> None:
         "각 시나리오는 독립된 임시 DB와 새 앱에서 실제 요청을 보내고, **응답 코드와 DB 상태**로 판정합니다. "
         "정상 사용이 되는지 먼저 확인하는 양성 대조가 깨지면 PASS/FAIL이 아니라 ERROR로 표시합니다."
     )
-    label = st.radio("실행 모드", list(helpers.MODE_LABELS.values()), horizontal=True, key="api_mode")
+    label = st.radio(
+        "실행 모드", list(helpers.MODE_LABELS.values()), horizontal=True, key="api_mode", disabled=_busy()
+    )
     mode = next(key for key, value in helpers.MODE_LABELS.items() if value == label)
     if mode == "vulnerable":
         st.warning(
@@ -170,31 +289,13 @@ def render_api_tab() -> None:
             "네트워크에 열리지 않습니다."
         )
 
-    if st.button("보안 시나리오 실행", type="primary", key="run_api"):
-        _run_api(mode)
+    run_button("보안 시나리오 실행", "run_api", "api", mode)
 
     result = st.session_state["api_results"].get(mode)
     if result is None:
         st.info(f"{NOT_RUN} (**{label}** 미실행)")
         return
     _render_api_result(result)
-
-
-def _run_api(mode: str) -> None:
-    progress = st.progress(0.0, text="검사 준비 중...")
-
-    def on_progress(done: int, total: int, name: str) -> None:
-        text = "검사 완료" if name == "완료" else f"검사 중 ({done + 1}/{total}): {name}"
-        progress.progress(done / total, text=text)
-
-    try:
-        st.session_state["api_results"][mode] = services.run_api_checks(mode, on_progress)
-    except Exception:  # 상세 예외(경로 등)는 화면에 내지 않고 콘솔 로그에 남긴다
-        logger.exception("API 보안 시나리오 실행 실패")
-        st.session_state["api_results"].pop(mode, None)
-        st.error("검사를 실행하지 못했습니다(ERROR). 터미널 로그를 확인하세요. 이 상태는 보안 위반(FAIL)이 아닙니다.")
-    finally:
-        progress.empty()
 
 
 def _render_api_result(result: dict) -> None:
@@ -259,24 +360,13 @@ def render_sast_tab() -> None:
     targets = [t.name for t in sast_runner.TARGETS]
     st.markdown("**검사 대상(고정):** " + " · ".join(f"`{name}`" for name in targets))
 
-    if st.button("Semgrep 정적 분석 실행", type="primary", key="run_sast"):
-        _run_sast()
+    run_button("Semgrep 정적 분석 실행", "run_sast", "sast")
 
     run = st.session_state["sast_run"]
     if run is None:
         st.info(f"{NOT_RUN} (정적 분석 미실행)")
         return
     _render_sast_result(run)
-
-
-def _run_sast() -> None:
-    try:
-        with st.spinner("Semgrep 실행 중... (대상 3곳, 수 초~수십 초)"):
-            st.session_state["sast_run"] = services.run_static_analysis()
-    except Exception:
-        logger.exception("정적 분석 실행 실패")
-        st.session_state["sast_run"] = None
-        st.error("정적 분석을 실행하지 못했습니다(SCAN_ERROR). 터미널 로그를 확인하세요.")
 
 
 def _render_sast_result(run: dict) -> None:
@@ -321,15 +411,108 @@ def _render_sast_target(target: dict, rule_ids: list[str]) -> None:
 
 
 # ============================================================================================
-# ④ 수정 전후 비교 / 보고서
+# ④ 수정 전후 비교 / 탐지 / 보고서
 # ============================================================================================
 
 def render_compare_tab() -> None:
-    st.subheader("수정 전후 비교 · 보고서")
-    st.info(
-        "이 탭은 **DAY 7에 구현 예정**입니다 (취약↔안전 FAIL→PASS 집계, SAST↔동적 테스트 비교표, 진단 보고서 내려받기). "
-        "아직 실행하지 않은 비교 결과를 미리 보여 주지 않습니다."
+    st.subheader("수정 전후 비교 · 탐지 · 보고서")
+    st.caption(
+        "한 번의 시연에서 **문제 재현 → 원인 표시 → 수정 버전 재검증 → 탐지 경보 → 보고서 생성**이 이어집니다. "
+        "아래 모든 표는 실제로 실행한 결과에서 계산하며, 실행하지 않은 부분은 '미실행'으로 둡니다."
     )
-    st.markdown(
-        "지금도 **②탭**에서 `취약 버전`과 `안전 버전`을 각각 실행해 같은 시나리오의 결과를 직접 비교해 볼 수 있습니다."
+    run_button("전체 검사 실행 (취약 → 안전 → 정적 분석 → DET-01)", "run_full", "full")
+
+    api = st.session_state["api_results"]
+    vulnerable, secure = api.get("vulnerable"), api.get("secure")
+    sast_run, det01 = st.session_state["sast_run"], st.session_state["det01"]
+
+    _render_comparison(vulnerable, secure)
+    _render_coverage(vulnerable, secure, sast_run)
+    _render_detection(det01)
+    _render_report_downloads(vulnerable, secure, sast_run, det01)
+
+
+def _render_comparison(vulnerable: dict | None, secure: dict | None) -> None:
+    st.markdown("### ① 수정 전후 비교 (취약 버전 → 안전 버전)")
+    if not (vulnerable and secure):
+        missing = " · ".join(
+            name for name, run in (("취약 버전", vulnerable), ("안전 버전", secure)) if not run
+        )
+        st.info(f"{NOT_RUN} 비교하려면 취약 버전과 안전 버전 결과가 모두 필요합니다. (없는 결과: {missing})")
+        return
+    comparison = compare_runs(vulnerable, secure)
+    core = comparison["core"]
+    cols = st.columns(4)
+    cols[0].metric("비교 대상(핵심)", core["total"])
+    cols[1].metric("개선 확인(FAIL→PASS)", core["IMPROVED"])
+    cols[2].metric("판정 불가", core["UNDETERMINED"])
+    cols[3].metric("그 외", core["NOT_IMPROVED"] + core["REGRESSED"] + core["CHECK_INEFFECTIVE"] + core["MISSING"])
+    st.dataframe(helpers.comparison_table(comparison["rows"], "core"), hide_index=True, width="stretch")
+    detail = helpers.comparison_table(comparison["rows"], "detail")
+    if detail:
+        st.markdown("**세부 테스트** (핵심 집계 제외)")
+        st.dataframe(detail, hide_index=True, width="stretch")
+    st.caption(
+        "개선은 취약 버전 FAIL과 안전 버전 PASS가 **둘 다 실제로 관측된 경우만** 센 것입니다. 결과가 없거나 ERROR가 끼면 집계하지 않습니다. "
+        "'정의된 검사 범위 내 개선 확인'이며 모든 취약점이 제거됐다는 뜻이 아닙니다."
     )
+
+
+def _render_coverage(vulnerable: dict | None, secure: dict | None, sast_run: dict | None) -> None:
+    st.markdown("### ② SAST ↔ 동적 테스트 탐지 범위 비교")
+    if vulnerable is None and sast_run is None:
+        st.info(f"{NOT_RUN} 두 방법의 결과를 비교하려면 API 보안 테스트(취약 버전)와 정적 분석이 필요합니다.")
+        return
+    st.dataframe(
+        helpers.coverage_table(coverage_rows(vulnerable, secure, sast_run)), hide_index=True, width="stretch"
+    )
+    st.caption(
+        "정적 분석만으로 업무 로직 결함을 보장할 수 없고, 동적 테스트만으로 코드 패턴 결함을 모두 찾을 수도 없습니다. "
+        "'미실행'인 열은 해당 검사를 아직 하지 않은 것입니다."
+    )
+
+
+def _render_detection(det01: dict | None) -> None:
+    st.markdown("### ③ 감사 로그 기반 탐지 DET-01 (계좌 열거 의심)")
+    st.caption(
+        "같은 사용자가 최근 5분 안에 서로 다른 계좌 3개 이상에서 거부/없음 응답을 받으면 경보합니다. "
+        "경보는 **실제 감사 로그(audit_log) 조회 결과로만** 만들어집니다."
+    )
+    run_button("DET-01 탐지 검증 실행", "run_det", "det")
+    if det01 is None:
+        st.info(f"{NOT_RUN} (DET-01 미실행)")
+        return
+    box = {"PASS": st.success, "FAIL": st.error}.get(det01["status"], st.warning)
+    box(f"**{helpers.status_label(det01['status'])}** — {det01['observed']}")
+    st.markdown(f"**기대:** {det01['expected']}")
+    st.markdown(f"**실제 근거:** {det01['evidence']}")
+    if det01["steps"]:
+        st.dataframe(
+            [{"단계": s["step"], "요청": s["request"], "응답": s["http_status"], "그 시점 경보 수": s["alerts_after"]}
+             for s in det01["steps"]],
+            hide_index=True, width="stretch",
+        )
+    if det01["alerts"]:
+        st.markdown("**발생한 경보**")
+        st.dataframe(helpers.alert_table(det01["alerts"]), hide_index=True, width="stretch")
+    st.caption("한계: 연속 입력 실수·공유 토큰은 오탐이 될 수 있고, 임계값 아래로 천천히 시도하거나 토큰을 바꾸면 놓칩니다.")
+
+
+def _render_report_downloads(vulnerable, secure, sast_run, det01) -> None:
+    st.markdown("### ④ 진단 보고서")
+    bundle = {"api_vulnerable": vulnerable, "api_secure": secure, "sast": sast_run, "det01": det01}
+    if not any(bundle.values()):
+        st.info(f"{NOT_RUN} 검사를 실행하면 보고서를 내려받을 수 있습니다.")
+        return
+    markdown = report.build_report(bundle)
+    left, right = st.columns(2)
+    left.download_button(
+        "진단 보고서 내려받기 (Markdown)", data=markdown.encode("utf-8"),
+        file_name="bankguard_diagnosis_report.md", mime="text/markdown", key="download_report_md",
+    )
+    right.download_button(
+        "검사 결과 내려받기 (JSON)", data=json.dumps(bundle, ensure_ascii=False, indent=2).encode("utf-8"),
+        file_name="bankguard_results.json", mime="application/json", key="download_results_json",
+    )
+    with st.expander("보고서 미리보기", expanded=False):
+        st.markdown(markdown)

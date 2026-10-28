@@ -55,6 +55,53 @@ def summarize(items: list[dict]) -> dict[str, int]:
     return counts
 
 
+STATUS_SHORT = {"PASS": "✅ PASS", "FAIL": "❌ FAIL", "ERROR": "⚠️ ERROR", "SKIP": "⏭️ SKIP", None: "미실행"}
+
+
+def comparison_table(rows: list[dict], tier: str) -> list[dict]:
+    """scanners.compare.compare_runs의 행을 표로. 판정 문구는 compare가 정한 값을 그대로 쓴다."""
+    return [
+        {
+            "ID": r["id"],
+            "점검 항목": r["name"],
+            "위험도": r["risk"],
+            "취약 버전": STATUS_SHORT.get(r["vulnerable"], r["vulnerable"]),
+            "안전 버전": STATUS_SHORT.get(r["secure"], r["secure"]),
+            "판정": r["outcome_label"],
+        }
+        for r in rows
+        if r["tier"] == tier
+    ]
+
+
+def coverage_table(rows: list[dict]) -> list[dict]:
+    return [
+        {
+            "결함": r["flaw"],
+            "위치": r["location"],
+            "동적 테스트": r["dynamic"]["label"],
+            "Semgrep": r["semgrep"]["label"],
+            "해석": r["interpretation"],
+        }
+        for r in rows
+    ]
+
+
+def alert_table(alerts: list[dict]) -> list[dict]:
+    return [
+        {
+            "규칙": f"{a['rule_id']} {a['title']}",
+            "사용자 ID": str(a["actor_user_id"]),
+            "토큰 지문": a["token_fingerprint"],
+            "서로 다른 계좌 수": a["distinct_accounts"],
+            "대상 계좌 ID": ", ".join(str(x) for x in a["target_account_ids"]),
+            "최초": format_kst(a["first_seen"]),
+            "최근": format_kst(a["last_seen"]),
+        }
+        for a in alerts
+    ]
+
+
 def finding_rows(target_result: dict) -> list[dict]:
     """Semgrep 탐지 항목을 표(dataframe) 행으로. 값은 sast_runner가 정규화한 실제 출력 그대로다."""
     return [

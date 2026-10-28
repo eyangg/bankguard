@@ -27,16 +27,21 @@ st.title("BANKGUARD | BANK API SECURITY LAB")
 st.caption("가상 은행 API의 취약점을 자동 검증하고, 수정 전후를 비교합니다.")
 tabs.render_sidebar()
 
+# 검사 진행 상황·알림은 어느 탭을 보고 있든 보이도록 탭 위쪽 고정 영역에 둔다.
+status_box = st.container()
+tabs.render_notice(status_box)
+
 overview, api_tab, sast_tab, compare_tab = st.tabs(
     ["① 개요", "② API 보안 테스트", "③ 정적 코드 분석", "④ 개선 비교·보고서"]
 )
-# 탭의 화면 위치는 st.tabs()에서 만든 순서로 정해지고, 채우는 순서는 자유다.
-# 검사 버튼(②③)이 세션 상태를 바꾸므로 ①개요의 요약은 그 뒤에 그려야 방금 실행한 결과가 바로 반영된다.
+with overview:
+    tabs.render_overview()
 with api_tab:
     tabs.render_api_tab()
 with sast_tab:
     tabs.render_sast_tab()
 with compare_tab:
     tabs.render_compare_tab()
-with overview:
-    tabs.render_overview()
+
+# 예약된 검사가 있으면 화면을 모두 그린 뒤(실행 버튼은 비활성화된 상태) 실제로 실행하고, 끝나면 새로 그려 결과를 반영한다.
+tabs.execute_pending_job(status_box)

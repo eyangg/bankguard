@@ -10,6 +10,12 @@ from fastapi.testclient import TestClient
 from backend.factory import create_app
 
 
+@pytest.fixture(autouse=True)
+def isolated_artifacts_dir(tmp_path, monkeypatch):
+    """모든 테스트가 사용자의 실제 artifacts/ 결과를 덮어쓰지 않도록 저장 위치를 임시 폴더로 고정한다."""
+    monkeypatch.setenv("BANKGUARD_ARTIFACTS_DIR", str(tmp_path / "artifacts_out"))
+
+
 @pytest.fixture()
 def db_path(tmp_path):
     return tmp_path / "bankguard_test.db"

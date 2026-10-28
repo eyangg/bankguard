@@ -9,11 +9,14 @@
 """
 from __future__ import annotations
 
+import logging
+import sqlite3
 import tempfile
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from backend.config import (
     API_VERSION,
@@ -25,6 +28,8 @@ from backend.config import (
 from backend.routes import admin_router, router
 
 SUPPORTED_MODES = PUBLIC_MODES | LAB_MODES
+
+logger = logging.getLogger("bankguard.api")
 
 
 def _require_isolated_db(db_path: str | Path | None) -> Path:
@@ -87,6 +92,25 @@ def create_app(
         app.include_router(setup.router)
     app.include_router(router)
     app.include_router(admin_router)
+
+    # 응답에는 일반화된 메시지만 담는다(스택트레이스·로컬 경로·SQL·예외 메시지 비노출, T16).
+    # 자세한 내용은 서버 콘솔 로그에만 남긴다.
+    @app.exception_handler(sqlite3.OperationalError)
+    async def database_error_handler(request: Request, exc: sqlite3.OperationalError) -> JSONResponse:
+        logger.exception("DB 오류: %s %s", request.method, request.url.path)
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            # 오류를 숨기지 않고 '일시적 사용 중'임을 알려 재시도할 수 있게 한다(명세 15장 DB 파일 잠김).
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "데이터베이스가 일시적으로 사용 중입니다. 잠시 후 다시 시도하세요."},
+                headers={"Retry-After": "1"},
+            )
+        return JSONResponse(status_code=500, content={"detail": "서버 내부 오류가 발생했습니다."})
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("처리되지 않은 오류: %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "서버 내부 오류가 발생했습니다."})
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
