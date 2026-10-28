@@ -1,0 +1,162 @@
+# BankGuard 로컬 Semgrep 규칙 (명세 8.3, v1.1 금융 맥락)
+#
+# 읽는 법
+# - 이 규칙들은 '소스 패턴'만 본다. 계좌 소유권·중복 송금 같은 업무 로직 결함은 탐지한다고 주장하지 않는다
+#   (그건 scanners/api_runner.py의 실행 기반 시나리오가 담당한다).
+# - 탐지는 "검토가 필요한 의심 항목"이지 확정 취약점이 아니다. 오탐 가능성은 각 규칙 주석과 README에 적는다.
+# - CWE 번호·제목은 MITRE 원문(cwe.mitre.org)에서 확인한 값이다.
+# - 각 규칙마다 '탐지돼야 하는 샘플'(fixtures/code/vulnerable_example.py)과
+#   '탐지되면 안 되는 샘플'(fixtures/code/fixed_example.py)이 있고 tests/test_sast_rules.py가 둘 다 확인한다.
+
+rules:
+  # ---------------------------------------------------------------------------------------------
+  # BG-SAST-001  SQL 문자열 조립
+  # 오탐 가능성: `.execute`라는 이름의 모든 메서드에 걸린다(sqlite3 연결인지 타입으로는 구분하지 못함).
+  #   조립한 값이 내부 상수·검증된 컬럼명뿐이면 실제 SQL 삽입이 아닐 수 있다 → 사람이 검토한다.
+  # 미탐 가능성: 다른 함수에서 조립해 넘긴 SQL, 딕셔너리·리스트에 담아 넘긴 SQL은 따라가지 못한다.
+  # ---------------------------------------------------------------------------------------------
+  - id: BG-SAST-001
+    languages: [python]
+    severity: WARNING
+    message: >-
+      SQL을 f-string·%·+·.format()으로 조립해 execute()에 전달합니다(검토 필요). 값은 파라미터 바인딩(?)으로 넘기세요.
+    metadata:
+      cwe: ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"]
+      category: security
+      confidence: LOW
+      kr_note: SQL 삽입 계열
+    patterns:
+      - pattern-either:
+          # 호출 인자에서 바로 조립
+          - pattern: $C.$M(f"...{$X}...", ...)
+          - pattern: $C.$M("..." % $X, ...)
+          - pattern: $C.$M("..." + $X, ...)
+          - pattern: $C.$M($X + "...", ...)
+          - pattern: $C.$M("...".format(...), ...)
+          # 변수에 조립해 두었다가 전달
+          - pattern: |
+              $SQL = f"...{$X}..."
+              ...
+              $C.$M($SQL, ...)
+          - pattern: |
+              $SQL = "..." % $X
+              ...
+              $C.$M($SQL, ...)
+          - pattern: |
+              $SQL = "..." + $X
+              ...
+              $C.$M($SQL, ...)
+          - pattern: |
+              $SQL = "...".format(...)
+              ...
+              $C.$M($SQL, ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(execute|executescript)$
+
+  # ---------------------------------------------------------------------------------------------
+  # BG-SAST-002  금액 관련 이름에 float
+  # 금융 특화 커스텀 규칙이다. 명세는 CWE-681 계열로 적었으나 681은 '숫자형 변환' 항목이라
+  # 실수 표현의 정밀도 부족을 다루는 CWE-1339가 더 정확해 그쪽을 적는다(MITRE 원문 확인).
+  # 오탐 가능성: 이름에 amount/balance/_krw가 들어가면 용도와 무관하게 걸린다(예: amount_ratio = 0.5).
+  # 미탐 가능성: 이름에 단서가 없는 변수(total, fee 등)와 float을 반환하는 함수 호출은 잡지 못한다.
+  # ---------------------------------------------------------------------------------------------
+  - id: BG-SAST-002
+    languages: [python]
+    severity: WARNING
+    message: >-
+      금액·잔액 이름의 변수에 float을 사용합니다(검토 필요). 원화 금액은 정수(원)로 다루세요.
+    metadata:
+      cwe: ["CWE-1339: Insufficient Precision or Accuracy of a Real Number"]
+      category: correctness
+      confidence: LOW
+      kr_note: 금융 특화 커스텀 규칙(명세 CWE-681 계열 표기와 다름 — 위 주석 참고)
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: $VAR = float(...)
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)^.*(amount|balance|_krw).*$
+          - patterns:
+              - pattern: $VAR = $F
+              - metavariable-regex:
+                  metavariable: $F
+                  regex: ^-?[0-9]*\.[0-9]+$
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)^.*(amount|balance|_krw).*$
+          - patterns:
+              - pattern: |
+                  $VAR: float = ...
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)^.*(amount|balance|_krw).*$
+          - patterns:
+              - pattern: |
+                  def $FN(..., $VAR: float, ...):
+                      ...
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)^.*(amount|balance|_krw).*$
+
+  # ---------------------------------------------------------------------------------------------
+  # BG-SAST-003  민감 이름 변수를 로그·출력에 그대로 기록
+  # 오탐 가능성: 이름만 보고 판단한다. 마스킹·해시한 값을 token_/account_no_ 같은 이름에 담아도 걸린다
+  #   (단 *fingerprint*, *_fp, *mask* 가 들어간 이름은 제외한다).
+  # 미탐 가능성: dict["token"]·함수 호출 결과·여러 줄로 나눠 조립한 문자열은 잡지 못한다.
+  # ---------------------------------------------------------------------------------------------
+  - id: BG-SAST-003
+    languages: [python]
+    severity: WARNING
+    message: >-
+      토큰·계좌번호·비밀번호 이름의 값을 로그/출력에 그대로 기록합니다(검토 필요). 마스킹하거나 지문(해시 앞부분)만 남기세요.
+    metadata:
+      cwe: ["CWE-532: Insertion of Sensitive Information into Log File"]
+      category: security
+      confidence: LOW
+      kr_note: 민감정보 로그 노출
+    patterns:
+      - pattern-either:
+          - pattern: print(..., $X, ...)
+          - pattern: print(..., f"...{$X}...", ...)
+          - pattern: logging.$L(..., $X, ...)
+          - pattern: logging.$L(..., f"...{$X}...", ...)
+          - patterns:
+              - pattern-either:
+                  - pattern: $LOG.$L(..., $X, ...)
+                  - pattern: $LOG.$L(..., f"...{$X}...", ...)
+              - metavariable-regex:
+                  metavariable: $LOG
+                  regex: (?i)^.*log.*$
+      - metavariable-regex:
+          metavariable: $X
+          # 식별자(또는 a.b 형태)만 대상, 민감 이름을 포함하되 지문/마스킹 이름은 제외
+          regex: (?i)^(?=[a-z_][a-z0-9_.]*$)(?!.*(fingerprint|_fp|mask)).*(token|account_no|password|passwd|pwd|secret).*$
+
+  # ---------------------------------------------------------------------------------------------
+  # BG-SAST-004  TLS 검증 비활성화 / 하드코딩된 비밀
+  # 오탐 가능성: 변수 이름에 secret/password가 들어간 문자열 상수는 설명 문구여도 걸린다.
+  #   (이 프로젝트의 샘플은 가짜 값 DEMO_ONLY_NOT_A_REAL_SECRET 만 사용한다.)
+  # 미탐 가능성: 이름에 단서가 없는 비밀 문자열, requests 외 클라이언트(httpx 등)의 verify=False는 잡지 못한다.
+  # ---------------------------------------------------------------------------------------------
+  - id: BG-SAST-004
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS 인증서 검증을 끄거나(verify=False) 비밀 값을 코드에 직접 적었습니다(검토 필요). 검증을 켜고 비밀은 환경변수/비밀 저장소에서 읽으세요.
+    metadata:
+      cwe:
+        - "CWE-295: Improper Certificate Validation"
+        - "CWE-798: Use of Hard-coded Credentials"
+      category: security
+      confidence: MEDIUM
+      kr_note: 하드코딩된 중요정보 / 인증서 검증 미흡
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - patterns:
+          - pattern: $NAME = "..."
+          - pattern-not: $NAME = ""
+          - metavariable-regex:
+              metavariable: $NAME
+              regex: (?i)^.*(secret|password|passwd|pwd).*$

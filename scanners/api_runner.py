@@ -415,7 +415,8 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         id="SC-03", name="동시 송금 경쟁 조건 차단 (lost update)", risk="HIGH", likelihood="L2", impact="I3",
-        owasp="", cwe="",
+        # CWE 원문 확인(MITRE): 362 Race Condition, 367 TOCTOU. OWASP API 2023(10개 항목)에는 정확히 대응하는 항목이 없어 비움.
+        owasp="", cwe="CWE-362 / CWE-367",
         expected="동시 2건 중 정확히 1건 201·1건 409, 잔액 합 보존, 송금 기록 1건",
         description="같은 잔액으로 동시에 출금 요청 2건이 들어와도 잔액 이상이 출금되거나 돈이 복제되지 않는지 검사한다.",
         fix_guide="잔액 확인과 차감을 하나의 원자적 연산으로 묶는다(BEGIN IMMEDIATE + 조건부 UPDATE).",
@@ -423,7 +424,8 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         id="SC-04", name="중복 송금 방지 (멱등성)", risk="HIGH", likelihood="L3", impact="I3",
-        owasp="", cwe="",
+        # CWE 원문 확인(MITRE): 837 Improper Enforcement of a Single, Unique Action. OWASP API 2023에는 정확히 대응하는 항목이 없어 비움.
+        owasp="", cwe="CWE-837",
         expected="같은 request_id 재전송은 200·같은 거래 ID(출금 1회), 다른 금액은 409",
         description="네트워크 재시도 등으로 같은 요청이 두 번 와도 이중 출금되지 않는지 검사한다.",
         fix_guide="클라이언트가 보낸 request_id를 유일키로 저장·조회하고 payload_fingerprint로 내용 변경을 구별한다.",
@@ -447,7 +449,9 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         id="SC-02", name="잘못된 송금 금액 차단 (T06·T07, 0원·음수)", risk="HIGH", likelihood="L3", impact="I3",
-        owasp="", cwe="", tier="detail",
+        # CWE 원문 확인(MITRE): 602 Client-Side Enforcement of Server-Side Security, 20 Improper Input Validation.
+        # OWASP API 2023에는 입력 검증을 직접 다루는 항목이 없어 비움.
+        owasp="", cwe="CWE-602 / CWE-20", tier="detail",
         expected="422, 잔액 변동 없음, 신규 송금 기록 없음",
         description="서버가 금액을 직접 검증하는지(클라이언트 검증에 의존하지 않는지) 확인한다.",
         fix_guide="서버 입력 모델에서 금액을 정수 1 이상 상한 이하로 강제한다(StrictInt + gt/le).",

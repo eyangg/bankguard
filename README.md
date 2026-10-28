@@ -15,7 +15,7 @@
 | 2 | SQLite 스키마·시드, 안전 송금 API, 감사 로그 기록 | 완료 (Windows pytest 64 passed, 실서버 확인) / 탐지 규칙 DET-01은 DAY 7 예정 |
 | 3 | v1.2 스키마(role/status/nickname)·지급정지·별칭 변경 API, 취약/안전 격리 모드, SC-01·SC-05·SC-06 판정 | 완료 (Windows pytest 112 passed, 실서버 확인) |
 | 4 | SC-03 동시 송금 경쟁 조건, SC-04 멱등성, SC-02(T06·T07) 취약 구현, 핵심 5종+세부 1종 공통 실행 | 완료 (Windows pytest 151 passed) |
-| 5 | Semgrep 로컬 규칙·결과 파싱 | 예정 |
+| 5 | Semgrep 로컬 규칙(BG-SAST-001~004)·샘플·`sast_runner` 결과 파싱 | 완료 (Windows pytest 191 passed, 실제 Semgrep 1.182.1 스캔 확인) |
 | 6~7 | Streamlit 4탭 대시보드, 전후 비교 | 예정 |
 | 8 | 안정화·문서·시연 | 예정 |
 
@@ -77,6 +77,24 @@ python3.12 -m venv .venv-semgrep
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
+### 정적 분석(Semgrep) 직접 실행
+
+앱은 `scanners/sast_runner.py`가 고정된 대상 3곳(`fixtures/code`, `backend/services/insecure_lab.py`,
+`backend/`)을 스캔합니다. 같은 명령을 손으로 실행해 볼 수도 있습니다.
+
+```powershell
+$env:PYTHONUTF8 = "1"   # ⚠️ 한국어 Windows 필수 (아래 설명)
+.\.venv-semgrep\Scripts\semgrep.exe scan --config rules/bankguard.yml --metrics=off --disable-version-check fixtures/code
+```
+
+> **Windows 주의 — 인코딩:** 규칙 파일(`rules/bankguard.yml`)의 설명과 메시지는 UTF-8 한글입니다. 한국어 Windows는 기본
+> 인코딩이 cp949라서 `PYTHONUTF8=1` 없이 실행하면 Semgrep이 규칙 파일을 읽다 `UnicodeDecodeError`로 종료합니다
+> (종료 코드 2, `--quiet`를 쓰면 메시지도 안 보입니다). `sast_runner`는 자식 프로세스에 이 값을 자동으로 설정합니다.
+
+Semgrep 결과는 **검토가 필요한 의심 항목**이지 확정 취약점이 아닙니다. 탐지 0건은 "그 규칙의 패턴을 찾지 못했다"는 뜻이며
+코드가 안전하다는 보증이 아닙니다. 특히 소유권 검사 누락, 경쟁 조건, 멱등성 같은 **업무 로직 결함은 이 규칙으로 탐지하지
+못합니다**(실행 기반 시나리오가 담당).
+
 ## 의존성 분리 이유 (2026-10-27 실제 확인)
 
 `semgrep 1.182.1`은 `opentelemetry-api==1.37.x`를 고정하고 `fastapi 0.162.0`은 `opentelemetry-api>=1.44.0`을 요구해
@@ -104,6 +122,8 @@ bankguard/
 | 2026-10-27 | Ubuntu 22.04 VM, Python 3.12.15 | `python -m pytest -q` | 9 passed, 1 warning |
 | 2026-10-27 | 동일 | uvicorn 실행 후 `GET /health`, `GET /docs` | 200 / 200 |
 | 2026-10-27 | 동일 | streamlit 실행 후 `/_stcore/health`, `/` | 200 / 200 |
+| 2026-10-28 | Windows 11, Python 3.12.10, Semgrep 1.182.1 | `.\.venv\Scripts\python.exe -m pytest -q` | 191 passed, 1 warning |
+| 2026-10-28 | 동일 | `sast_runner.run_sast()` (실제 Semgrep) | fixtures 17건 · insecure_lab 1건 · backend(lab 제외) 0건, SCAN_ERROR 0 |
 | 2026-10-27 | 동일 | `semgrep --version` | 1.182.1 |
 | — | Windows 10 PowerShell | 위 전체 | **미검증** |
 
