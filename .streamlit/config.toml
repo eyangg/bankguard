@@ -1,0 +1,8 @@
+# 대시보드를 이 PC에서만 접근 가능하게 로컬 주소에 바인딩한다(명세: 로컬 전용).
+[server]
+address = "127.0.0.1"
+port = 8501
+headless = false
+
+[browser]
+gatherUsageStats = false

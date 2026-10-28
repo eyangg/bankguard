@@ -1,0 +1,9 @@
+# BankGuard 앱 의존성 (API + 대시보드 + 테스트)
+# 2026-10-27 Python 3.12.15 환경에서 실제 설치 및 `uv pip check` 호환성 확인한 버전
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+streamlit==1.66.1
+pytest==9.1.1
+httpx==0.28.1
+# semgrep은 여기 넣지 않음 -> requirements-sast.txt 참고
