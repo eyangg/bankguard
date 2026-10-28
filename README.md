@@ -16,7 +16,8 @@
 | 3 | v1.2 스키마(role/status/nickname)·지급정지·별칭 변경 API, 취약/안전 격리 모드, SC-01·SC-05·SC-06 판정 | 완료 (Windows pytest 112 passed, 실서버 확인) |
 | 4 | SC-03 동시 송금 경쟁 조건, SC-04 멱등성, SC-02(T06·T07) 취약 구현, 핵심 5종+세부 1종 공통 실행 | 완료 (Windows pytest 151 passed) |
 | 5 | Semgrep 로컬 규칙(BG-SAST-001~004)·샘플·`sast_runner` 결과 파싱 | 완료 (Windows pytest 191 passed, 실제 Semgrep 1.182.1 스캔 확인) |
-| 6~7 | Streamlit 4탭 대시보드, 전후 비교 | 예정 |
+| 6 | Streamlit 대시보드(① 개요 · ② API 보안 테스트 · ③ 정적 코드 분석), 위협 모델 `docs/threat_model.md` | 완료 (Windows pytest 210 passed) — ④ 개선 비교·보고서 탭은 DAY 7 |
+| 7 | 수정 전후 비교(FAIL→PASS 집계), 탐지 DET-01, SAST↔동적 비교표, 진단 보고서, CI 게이트 | 예정 |
 | 8 | 안정화·문서·시연 | 예정 |
 
 ## 준비물
@@ -71,7 +72,8 @@ python3.12 -m venv .venv-semgrep
 
 # 터미널 B — 대시보드
 .\.venv\Scripts\python.exe -m streamlit run frontend/app.py
-#   http://127.0.0.1:8501
+#   브라우저가 자동으로 열리지 않습니다. http://127.0.0.1:8501 을 직접 여세요.
+#   (검사 버튼은 API 서버(터미널 A) 없이도 동작합니다. API를 켜 두면 ① 개요에 실시간 잔액이 표시됩니다.)
 
 # 자동 테스트
 .\.venv\Scripts\python.exe -m pytest -q
@@ -124,6 +126,8 @@ bankguard/
 | 2026-10-27 | 동일 | streamlit 실행 후 `/_stcore/health`, `/` | 200 / 200 |
 | 2026-10-28 | Windows 11, Python 3.12.10, Semgrep 1.182.1 | `.\.venv\Scripts\python.exe -m pytest -q` | 191 passed, 1 warning |
 | 2026-10-28 | 동일 | `sast_runner.run_sast()` (실제 Semgrep) | fixtures 17건 · insecure_lab 1건 · backend(lab 제외) 0건, SCAN_ERROR 0 |
+| 2026-10-28 | 동일 | `.\.venv\Scripts\python.exe -m pytest -q` (대시보드 AppTest 포함) | 210 passed, 1 warning |
+| 2026-10-28 | 동일 | `streamlit run frontend/app.py` 후 `/_stcore/health`, `/` | 200 / 200 (화면 육안 확인은 사용자 확인 필요) |
 | 2026-10-27 | 동일 | `semgrep --version` | 1.182.1 |
 | — | Windows 10 PowerShell | 위 전체 | **미검증** |
 

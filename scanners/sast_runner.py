@@ -97,6 +97,22 @@ def rule_ids_in(rules_file: Path = RULES_FILE) -> list[str]:
     return re.findall(r"^\s*-\s+id:\s*(\S+)\s*$", text, flags=re.MULTILINE)
 
 
+def rule_catalog(rules_file: Path = RULES_FILE) -> list[dict]:
+    """화면용 규칙 설명(ID·심각도·메시지·CWE). 규칙 파일이 단일 출처라 따로 복사해 두지 않는다."""
+    import yaml
+
+    data = yaml.safe_load(rules_file.read_text(encoding="utf-8"))
+    return [
+        {
+            "rule_id": rule["id"],
+            "severity": rule.get("severity"),
+            "message": " ".join(str(rule.get("message", "")).split()),
+            "cwe": list((rule.get("metadata") or {}).get("cwe") or []),
+        }
+        for rule in data["rules"]
+    ]
+
+
 def _sanitize(text: str, limit: int = 600) -> str:
     """오류 메시지에서 색상 코드와 로컬 경로를 지우고 끝부분만 남긴다."""
     text = _ANSI.sub("", text)

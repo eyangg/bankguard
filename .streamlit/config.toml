@@ -2,7 +2,9 @@
 [server]
 address = "127.0.0.1"
 port = 8501
-headless = false
+# headless=true: 첫 실행 때 이메일 입력 프롬프트가 뜨지 않게 하고(입력창이 없는 환경에서는 그대로 종료됨),
+# 브라우저를 자동으로 열지 않는다. 실행 후 http://127.0.0.1:8501 을 직접 연다.
+headless = true
 
 [browser]
 gatherUsageStats = false
