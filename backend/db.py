@@ -62,17 +62,20 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA_SQL)
+def init_schema(conn: sqlite3.Connection, schema_sql: str = SCHEMA_SQL) -> None:
+    conn.executescript(schema_sql)
 
 
-def init_db(db_path: str | Path) -> None:
-    """상위 폴더를 만들고 스키마를 생성한 뒤, 비어 있으면 시드를 넣는다. 여러 번 호출해도 안전하다."""
+def init_db(db_path: str | Path, schema_sql: str = SCHEMA_SQL) -> None:
+    """상위 폴더를 만들고 스키마를 생성한 뒤, 비어 있으면 시드를 넣는다. 여러 번 호출해도 안전하다.
+
+    schema_sql은 취약 비교 모드(SC-02)가 DB 제약 없는 전용 스키마를 쓸 때만 바꾼다(명세 5장).
+    """
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = connect(path)
     try:
-        init_schema(conn)
+        init_schema(conn, schema_sql)
         seed_database(conn)
     finally:
         conn.close()

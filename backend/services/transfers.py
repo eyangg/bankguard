@@ -104,47 +104,43 @@ def execute_transfer(
                     from_account_id,
                     f"request_id 충돌 {s_mask}->{r_mask}",
                 )
-            conn.execute("COMMIT")
-            return TransferResult(
-                existing["id"], request_id, from_account_id, to_account_id, amount_krw,
-                True, s_mask, r_mask,
+            transfer_id, replay = existing["id"], True
+        else:
+            # 지급정지 확인과 잔액 확인을 차감과 같은 문장에 묶는다. 읽은 뒤 정지되는 경우(TOCTOU)도 막는다.
+            debited = conn.execute(
+                "UPDATE accounts SET balance_krw = balance_krw - ?"
+                " WHERE id = ? AND balance_krw >= ? AND status = 'ACTIVE'",
+                (amount_krw, from_account_id, amount_krw),
             )
-
-        # 지급정지 확인과 잔액 확인을 차감과 같은 문장에 묶는다. 읽은 뒤 정지되는 경우(TOCTOU)도 막는다.
-        debited = conn.execute(
-            "UPDATE accounts SET balance_krw = balance_krw - ?"
-            " WHERE id = ? AND balance_krw >= ? AND status = 'ACTIVE'",
-            (amount_krw, from_account_id, amount_krw),
-        )
-        if debited.rowcount != 1:
-            current = conn.execute(
-                "SELECT status FROM accounts WHERE id = ?", (from_account_id,)
-            ).fetchone()
-            if current is not None and current["status"] != "ACTIVE":
+            if debited.rowcount != 1:
+                current = conn.execute(
+                    "SELECT status FROM accounts WHERE id = ?", (from_account_id,)
+                ).fetchone()
+                if current is not None and current["status"] != "ACTIVE":
+                    raise TransferRejected(
+                        409,
+                        audit.TRANSFER_REJECTED,
+                        "출금 계좌가 지급정지 상태입니다.",
+                        from_account_id,
+                        f"지급정지 계좌 출금 시도 {s_mask}",
+                    )
                 raise TransferRejected(
                     409,
                     audit.TRANSFER_REJECTED,
-                    "출금 계좌가 지급정지 상태입니다.",
+                    "잔액이 부족합니다.",
                     from_account_id,
-                    f"지급정지 계좌 출금 시도 {s_mask}",
+                    f"잔액 부족 {s_mask} amount={amount_krw}",
                 )
-            raise TransferRejected(
-                409,
-                audit.TRANSFER_REJECTED,
-                "잔액이 부족합니다.",
-                from_account_id,
-                f"잔액 부족 {s_mask} amount={amount_krw}",
+            conn.execute(
+                "UPDATE accounts SET balance_krw = balance_krw + ? WHERE id = ?",
+                (amount_krw, to_account_id),
             )
-        conn.execute(
-            "UPDATE accounts SET balance_krw = balance_krw + ? WHERE id = ?",
-            (amount_krw, to_account_id),
-        )
-        cur = conn.execute(
-            "INSERT INTO transfers (request_id, sender_account_id, recipient_account_id,"
-            " amount_krw, payload_fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (request_id, from_account_id, to_account_id, amount_krw, fp, audit.utc_now_iso()),
-        )
-        transfer_id = cur.lastrowid
+            cur = conn.execute(
+                "INSERT INTO transfers (request_id, sender_account_id, recipient_account_id,"
+                " amount_krw, payload_fingerprint, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (request_id, from_account_id, to_account_id, amount_krw, fp, audit.utc_now_iso()),
+            )
+            transfer_id, replay = cur.lastrowid, False
         conn.execute("COMMIT")
     except BaseException:
         if conn.in_transaction:
@@ -152,5 +148,5 @@ def execute_transfer(
         raise
 
     return TransferResult(
-        transfer_id, request_id, from_account_id, to_account_id, amount_krw, False, s_mask, r_mask
+        transfer_id, request_id, from_account_id, to_account_id, amount_krw, replay, s_mask, r_mask
     )

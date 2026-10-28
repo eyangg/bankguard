@@ -40,16 +40,25 @@ def _require_isolated_db(db_path: str | Path | None) -> Path:
     return resolved
 
 
-def create_app(mode: str = "secure", db_path: str | Path | None = None) -> FastAPI:
+def create_app(
+    mode: str = "secure",
+    db_path: str | Path | None = None,
+    flaw: str | None = None,
+) -> FastAPI:
     """BankGuard FastAPI 앱을 만든다.
 
     Args:
         mode: "secure"(공개 가능) 또는 "vulnerable"(검사 전용, 임시 DB 필수).
         db_path: SQLite 파일 경로. 테스트는 임시 경로를 넘긴다.
+        flaw: vulnerable일 때 붙일 결함 ID("SC-01"~"SC-06") 하나. 결함을 섞어서 붙일 수 없다.
     """
     if mode not in SUPPORTED_MODES:
         raise ValueError(f"지원하지 않는 모드입니다: {mode!r}")
+    if mode in PUBLIC_MODES and flaw is not None:
+        raise ValueError("secure 모드에는 결함(flaw)을 지정할 수 없습니다.")
     if mode in LAB_MODES:
+        if flaw is None:
+            raise ValueError("vulnerable 모드는 결함 ID(flaw)를 하나 지정해야 합니다.")
         db_path = _require_isolated_db(db_path)
 
     app = FastAPI(
@@ -65,11 +74,17 @@ def create_app(mode: str = "secure", db_path: str | Path | None = None) -> FastA
 
     if mode in LAB_MODES:
         # 지연 import: 공개(secure) 경로에서는 취약 모듈이 메모리에 올라오지도 않는다.
-        from backend.services.insecure_lab import build_lab_router
+        from backend.db import init_db
+        from backend.services.insecure_lab import build_lab
 
+        setup = build_lab(flaw)
+        if setup.schema_sql is not None:
+            # 결함 전용 스키마(SC-02): 안전 코드 경로가 안전 스키마로 먼저 만들지 않도록 여기서 초기화한다.
+            init_db(app.state.db_path, setup.schema_sql)
+            app.state.db_ready = True
         # 먼저 등록한 경로가 우선하므로, 취약 라우터가 같은 경로의 안전 라우트를 가린다.
-        # 취약 라우터에 없는 경로(계좌 목록, 송금 등)는 아래 안전 라우터가 그대로 처리한다.
-        app.include_router(build_lab_router())
+        # 취약 라우터에 없는 경로(계좌 목록 등)는 아래 안전 라우터가 그대로 처리한다.
+        app.include_router(setup.router)
     app.include_router(router)
     app.include_router(admin_router)
 

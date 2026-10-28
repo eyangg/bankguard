@@ -36,6 +36,7 @@ class ScenarioItem:
     owasp: str = ""
     cwe: str = ""
     kr_weakness: str = ""  # 행안부 보안약점 항목명: 원문 확인 전에는 비워 둔다(명세 7.0)
+    tier: str = "core"  # "core"(핵심 시나리오) | "detail"(세부 테스트, v1.2: SC-02는 T06·T07로 하향)
 
 
 @dataclass
