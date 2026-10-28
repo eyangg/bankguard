@@ -12,7 +12,7 @@
 | DAY | 내용 | 상태 |
 |---|---|---|
 | 1 | 개발 환경, 프로젝트 골격, `GET /health`, Streamlit 첫 화면, 스모크 테스트 | 완료 (Linux·Windows 검증) |
-| 2 | SQLite 스키마·시드, 안전 송금 API | 예정 |
+| 2 | SQLite 스키마·시드, 안전 송금 API, 감사 로그 기록 | 완료 (Windows pytest 64 passed, 실서버 확인) / 탐지 규칙 DET-01은 DAY 7 예정 |
 | 3~4 | 보안 시나리오 SC-01~04, 취약/안전 격리 비교 | 예정 |
 | 5 | Semgrep 로컬 규칙·결과 파싱 | 예정 |
 | 6~7 | Streamlit 4탭 대시보드, 전후 비교 | 예정 |

@@ -18,5 +18,8 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "bankguard.db"
 # 대시보드가 호출하는 로컬 API 주소(고정값, 사용자 입력으로 바꾸지 않음)
 API_BASE_URL = "http://127.0.0.1:8000"
 
+# 안전 모드 송금 금액 상한(원). 하한은 1원 (명세 5장 불변식)
+MAX_TRANSFER_KRW = 10_000_000
+
 # 공개 서버에서 허용하는 모드. 취약 비교 모드는 여기에 절대 추가하지 않는다.
 PUBLIC_MODES = frozenset({"secure"})

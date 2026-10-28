@@ -6,11 +6,13 @@
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI
 
 from backend.config import API_VERSION, DEFAULT_DB_PATH, PUBLIC_MODES, SERVICE_NAME
+from backend.routes import router
 
 SUPPORTED_MODES = PUBLIC_MODES  # DAY 3에서 테스트 전용 "vulnerable"을 별도 경로로 추가 예정
 
@@ -32,6 +34,10 @@ def create_app(mode: str = "secure", db_path: str | Path | None = None) -> FastA
     )
     app.state.mode = mode
     app.state.db_path = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
+    # DB는 첫 API 요청 때 한 번 초기화한다(/health는 DB 없이 동작해야 함, 명세 6.1).
+    app.state.db_ready = False
+    app.state.db_lock = threading.Lock()
+    app.include_router(router)
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
