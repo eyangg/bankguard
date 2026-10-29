@@ -219,8 +219,36 @@ def build_report(bundle: dict, generated_at: datetime | None = None) -> str:
             "",
         ]
 
+    # 7. SCA -------------------------------------------------------------------------------------
+    sca = bundle.get("sca")
+    out += ["## 7. 의존성 취약점 점검(SCA, pip-audit)", ""]
+    if not sca:
+        out += ["미실행 — 인터넷이 필요해 전체 검사에 포함하지 않습니다. `python -m scanners.sca_runner`로 따로 실행합니다.", ""]
+    elif sca["scan_status"] != "COMPLETED":
+        out += [f"점검 불가({sca['error_kind']}): {_cell(sca['error_message'])} — 0건으로 간주하지 않습니다.", ""]
+    else:
+        out.append(
+            f"- **실행:** {format_kst(sca['run_at'])}, {sca['tool']} {sca['tool_version']}, 대상: {sca['target']}"
+        )
+        out.append(f"- **결과:** 패키지 {sca['dependency_count']}개 점검, 알려진 취약점 **{sca['vulnerability_count']}건**")
+        if sca["skipped"]:
+            out.append(f"- **점검 못 한 패키지:** {', '.join(s['name'] for s in sca['skipped'])}")
+        out.append("")
+        if sca["vulnerable_packages"]:
+            out += _table(
+                ["패키지", "설치 버전", "취약점 ID", "수정 버전"],
+                [[p["name"], p["version"], v["id"], ", ".join(v["fix_versions"]) or "없음"]
+                 for p in sca["vulnerable_packages"] for v in p["vulns"]],
+            )
+            out.append("")
+        out += [
+            "한계: 공개 취약점 DB(PyPI)에 등록된 '알려진' 취약점만 대상이며 0건이 안전을 보증하지 않습니다. "
+            "최근 조회 결과를 pip-audit이 HTTP 캐시 규칙에 따라 잠시 재사용할 수 있습니다.",
+            "",
+        ]
+
     out += [
-        "## 7. 한계와 주의",
+        "## 8. 한계와 주의",
         "",
         "- 토큰은 학습용 가상 식별자이며 실제 은행 인증과 동등하지 않습니다.",
         "- 취약 비교 구현은 격리된 임시 DB·인프로세스에서만 실행했고 네트워크에 공개하지 않았습니다.",
@@ -249,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         bundle = run_full_check(lambda done, total, name: print(f"  [{done}/{total}] {name}", flush=True))
         for kind, data in bundle.items():
             artifacts.save_json(kind, data)
+        bundle["sca"] = artifacts.load_json("sca")  # SCA는 별도 명령으로만 실행한다. 저장된 최근 결과가 있으면 실행 시각과 함께 싣는다.
 
     markdown = build_report(bundle)
     path = artifacts.save_text("diagnosis_report.md", markdown)

@@ -96,18 +96,19 @@ def sast(lab_findings=(), fixture_findings=(), lab_status="COMPLETED", fixture_s
 
 def vuln_run(status="FAIL"):
     return run(*(item(s, status, "detail" if s == "SC-02" else "core")
-                 for s in ("SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06")))
+                 for s in ("SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07")))
 
 
 def by_flaw(rows):
     return {r["flaw"]: r for r in rows}
 
 
-def test_coverage_table_has_the_eight_rows_of_the_spec():
+def test_coverage_table_has_the_spec_rows_plus_sc07():
     rows = coverage_rows(vuln_run(), vuln_run("PASS"), sast())
     assert [r["flaw"] for r in rows] == [
         "BOLA(소유권 검사 누락)", "음수/0 금액 허용", "경쟁 조건(비원자적 차감)", "멱등성 미처리",
-        "BFLA(역할 검사 누락)", "Mass Assignment(요청 키 그대로 반영)", "SQL 문자열 조립", "금액 float",
+        "BFLA(역할 검사 누락)", "Mass Assignment(요청 키 그대로 반영)", "인증 시도 횟수 제한 없음",
+        "SQL 문자열 조립", "금액 float",
     ]
 
 
@@ -117,6 +118,12 @@ def test_business_logic_flaws_are_dynamic_only_when_semgrep_finds_nothing_there(
     assert row["dynamic"]["state"] == "REPRODUCED" and row["dynamic"]["label"] == "SC-03 · 취약 FAIL / 안전 PASS"
     assert row["semgrep"]["status"] == "NOT_DETECTED_NO_RULE"
     assert "동적 테스트만 탐지" in row["interpretation"]
+
+
+def test_sc07_auth_limit_is_a_business_logic_flaw_without_a_rule():
+    row = by_flaw(coverage_rows(vuln_run(), vuln_run("PASS"), sast()))["인증 시도 횟수 제한 없음"]
+    assert row["dynamic"]["label"] == "SC-07 · 취약 FAIL / 안전 PASS"
+    assert row["semgrep"]["status"] == "NOT_DETECTED_NO_RULE"
 
 
 def test_unrelated_semgrep_finding_in_flaw_code_is_not_counted_as_detecting_the_flaw():

@@ -93,7 +93,7 @@ FIXTURE_VULNERABLE_FILE = "fixtures/code/vulnerable_example.py"
 
 # 결함 → 그 결함 코드가 있는 위치(심볼)와 그 결함을 '겨냥한' Semgrep 규칙.
 # 이 표는 '어디를 볼지'를 정할 뿐이고 결과(탐지 여부)는 실제 실행 결과에서만 나온다.
-# 업무 로직 결함(BOLA·BFLA·경쟁 조건·멱등성·금액 검증·Mass Assignment)은 겨냥한 규칙이 없다(명세 8.1).
+# 업무 로직 결함(BOLA·BFLA·경쟁 조건·멱등성·금액 검증·Mass Assignment·시도 횟수 제한)은 겨냥한 규칙이 없다(명세 8.1).
 FLAW_ROWS: tuple[dict, ...] = (
     {"flaw": "BOLA(소유권 검사 누락)", "scenario_id": "SC-01", "lab_symbols": ("lab_list_account_transactions",),
      "fixture_files": (), "relevant_rules": ()},
@@ -107,6 +107,8 @@ FLAW_ROWS: tuple[dict, ...] = (
      "fixture_files": (), "relevant_rules": ()},
     {"flaw": "Mass Assignment(요청 키 그대로 반영)", "scenario_id": "SC-06",
      "lab_symbols": ("NicknameUpdateLoose", "lab_update_account_nickname"),
+     "fixture_files": (), "relevant_rules": ()},
+    {"flaw": "인증 시도 횟수 제한 없음", "scenario_id": "SC-07", "lab_symbols": ("lab_current_user",),
      "fixture_files": (), "relevant_rules": ()},
     {"flaw": "SQL 문자열 조립", "scenario_id": None, "lab_symbols": ("lab_update_account_nickname",),
      "fixture_files": (FIXTURE_VULNERABLE_FILE,), "relevant_rules": ("BG-SAST-001",)},

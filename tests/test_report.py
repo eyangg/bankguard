@@ -57,7 +57,7 @@ def test_report_contains_required_columns_and_sections():
     assert text.startswith("# BankGuard 보안 진단 보고서")
     for heading in ("## 0. 진단 개요", "## 1. 요약", "## 2. 점검 항목 결과", "## 3. 항목별 상세",
                     "## 4. 정적 분석(Semgrep) 결과", "## 5. SAST ↔ 동적 테스트 탐지 범위 비교",
-                    "## 6. 감사 로그 기반 탐지", "## 7. 한계와 주의"):
+                    "## 6. 감사 로그 기반 탐지", "## 7. 의존성 취약점 점검(SCA", "## 8. 한계와 주의"):
         assert heading in text
     for column in ("점검 항목", "위험도(L×I)", "취약 여부(취약 버전)", "이행점검(안전 버전 재검증)", "개선 판정", "매핑"):
         assert column in text

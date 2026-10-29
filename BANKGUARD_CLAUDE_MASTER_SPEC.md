@@ -1,11 +1,114 @@
 # BankGuard — Claude 전달용 마스터 개발 명세서
 
-> **문서 버전:** v1.2 / 2026-10-28 (v1.1 / 2026-10-28, v1.0 / 2026-10-27)  
-> **프로젝트 성격:** 1인 바이브 코딩 프로젝트, 은행 IT·애플리케이션 보안 포트폴리오  
+> **문서 버전:** v2.0 / 2026-10-29 (v1.2 / 2026-10-28, v1.1 / 2026-10-28, v1.0 / 2026-10-27)  
+> **프로젝트 성격:** 1인 바이브 코딩 프로젝트(바이브코딩 수업 개별 사이드 프로젝트), 은행 IT·애플리케이션 보안 포트폴리오  
 > **목표 직무:** 금융권 IT 보안 부서 (AppSec·취약점 진단·데이터분석보안)  
-> **일정:** 총 10일 중 실제 개발 8일, 하루 약 7~9시간 (약 56~72시간)  
+> **일정:** 10/28~11/6 오전 개발, 11/6 오후 최종 산출물 정리·발표. v1.x 계획(DAY 1~8)은 10/29 오전에 완료됨 → 남은 일정은 `docs/plan.md`(Phase A~E + 확장 X1~X4)를 따른다  
+> **필수 스택(수업 고정):** FastAPI · React · TypeScript · Supabase  
 > **언어:** 모든 UI, README, 결과 설명, 작업 보고는 한국어  
 > **우선순위:** 실제 동작 > 검증 가능성 > 직무 연관성 > 시연 완성도 > 화면 장식
+
+---
+
+## v2.0 (2026-10-29) — 이 장이 문서 전체의 최상위 기준
+
+우선순위: **v2.0 장 > v1.2 표 > v1.1 표 > 본문.** 아래 9절에 적힌 v1.x 항목은 v2.0으로 대체된다.
+
+### V0. 배경
+
+- v1.x 계획(DAY 1~8)은 Claude Code로 10/28 오후~10/29 오전에 모두 완료됐다(커밋 1f00d7e~d8c479f). 일정 추정이 사람이 직접 코딩하는 속도 기준이었기 때문이다.
+- 이 프로젝트는 바이브코딩 수업의 개별 사이드 프로젝트이며, 수업 필수 스택은 **FastAPI, React, TypeScript, Supabase**다. v1.x는 Streamlit·SQLite를 써서 React·TypeScript·Supabase가 빠져 있었다.
+- 수업 문서 흐름(MVP → PRD → SPEC → PLAN)에 맞춰 `docs/mvp.md`, `docs/prd.md`, `docs/spec.md`, `docs/plan.md`를 둔다. 이 마스터 명세는 원천 문서로 유지하고, docs 문서는 이 명세에서 쉬운 말로 뽑아낸다.
+- 남은 일정은 실제 속도 기준으로 다시 짰다. AI가 코드를 쓰는 부분은 빠르고, **사람이 해야 하는 일(Supabase 설정, Figma, 화면 직접 확인, 이해 정리, 발표)이 병목**이다. 수업 원칙 "사람이 병목이어야 한다"를 일부러 지킨다.
+
+### V1. 필수 스택 (완료 기준 1순위)
+
+| 영역 | 필수 도구 | v1.x 상태 | v2.0 목표 |
+|---|---|---|---|
+| 백엔드 | FastAPI | 사용 중 | 유지 |
+| 화면 | React | 없음(Streamlit) | Vite + React로 교체, Streamlit 제거 |
+| 언어 | TypeScript | 없음 | 모든 화면 코드는 `.ts`/`.tsx`, `strict: true`. `.jsx`/`.js` 금지 |
+| DB | Supabase | 없음(SQLite) | Supabase PostgreSQL을 운영(시연) DB로 사용. SQLite는 테스트 전용(수업 방식) |
+
+수업 06·08강과 같은 방식으로 **FastAPI가 Session pooler 접속 정보(`.env`)로 Supabase PostgreSQL에 연결**한다.
+
+### V2. 아키텍처와 설계 결정
+
+```text
+[React + TypeScript (Vite)] ──(같은 출처: Vite proxy /api)──▶ [FastAPI] ──(Session pooler)──▶ [Supabase PostgreSQL]
+                                                                 ▲
+[CLI·CI: 시나리오·Semgrep·pip-audit 실행] ─▶ artifacts/*.json ─────┘ (FastAPI는 결과를 읽기 전용으로 제공)
+```
+
+- **D1. 브라우저는 Supabase에 직접 접속하지 않는다.** anon/publishable 키를 프론트 코드나 `VITE_*` 변수에 두지 않는다(Vite의 `VITE_*` 값은 번들에 그대로 공개된다). DB 접근은 FastAPI만 한다. 근거: 프론트가 anon 키로 Supabase를 직접 부르는 구조에서 RLS 누락으로 수백 개 앱의 데이터가 노출된 사례(CVE-2025-48757).
+- **D2. 모든 public 테이블에 RLS를 켜고, `anon`·`authenticated` 역할의 테이블 권한을 회수(REVOKE)한다.** 정책이 없는 RLS는 API 역할에 대해 전부 거부가 된다. 백엔드는 DB 소유 역할로 접속한다.
+- **D3. 로그인은 직접 구현한다(Supabase Auth 미사용).** 인증 설계가 이 포트폴리오의 핵심 보안 요소이기 때문이다. 수업 자료도 Supabase를 DB로만 사용한다.
+- **D4. 점검 실행(시나리오·Semgrep·pip-audit)은 CLI와 CI에서만 한다.** 웹은 `artifacts/`의 결과를 **관리자만 읽기 전용**으로 본다. 배포 환경에 subprocess 실행 경로와 취약 모드 경로가 0개여야 한다.
+- **D5. 취약 비교 모드는 지금처럼 TestClient + 임시 SQLite에서만** 만든다. PostgreSQL 경쟁 조건 재현은 **테스트 전용 DB(시연 DB와 분리)**에서 공개 API 없이 한다.
+- **D6. 비밀값:** DB 접속 정보, TOTP 암호화 키, 시연 계정 비밀번호는 `.env`에만 둔다. `.env.example`에는 항목과 설명만 둔다. 코드·문서·로그·답변에 출력하지 않는다.
+
+### V3. DB 전환 (Phase B)
+
+- 드라이버 `psycopg`(3.x). 연결 계층에서 `BANKGUARD_DB_URL`로 SQLite/PostgreSQL을 고른다. 운영 서버는 PostgreSQL URL이 없으면 **SQLite로 자동 전환하지 않고 시작을 거부**한다(수업 06강 원칙). pytest 기본 실행은 임시 SQLite로 오프라인 유지.
+- SQL 차이를 연결 계층에서 흡수한다: 자리표시자(`?`↔`%s`), 트랜잭션 시작(`BEGIN IMMEDIATE`↔PostgreSQL 기본 트랜잭션), 자동 증가 키, 시간 타입. **안전 송금의 조건부 UPDATE(`WHERE balance_krw >= ? AND status='ACTIVE'`)는 두 DB에서 같은 의미로 동작해야 하며**, PostgreSQL에서는 행 잠금으로 직렬화됨을 테스트로 확인한다.
+- 스키마는 `database/migrations/0001_*.sql`처럼 번호 붙인 SQL 파일로 관리하고 적용 스크립트를 둔다(ORM을 쓰지 않으므로). RLS·REVOKE 문도 마이그레이션에 포함한다.
+- Supabase 프로젝트: **시연 DB와 통합 테스트 DB를 분리**한다(별도 프로젝트 권장, 불가하면 별도 schema). 무료 프로젝트 일시 정지 가능성을 README에 적는다.
+- **SC-08 Supabase 직접 접근 차단 점검(설정 점검, 신규).** 실제 시연 DB에 대해 SQL로 확인한다: (a) public 스키마의 모든 테이블이 `pg_class.relrowsecurity = true`, (b) `anon`·`authenticated` 역할에 테이블 권한이 없음(`information_schema.role_table_grants`). 하나라도 어기면 FAIL, 접속 불가는 ERROR. 취약 버전을 클라우드에 만들지 않는다(비교는 CVE 사례로 설명). 매핑: OWASP API8:2023, CWE-284.
+- **SC-03 PostgreSQL 재현(신규 통합 테스트).** `pytest -m postgres`로 테스트 DB에서 경쟁 조건 하네스를 실행한다. DB URL이 없으면 **SKIP으로 보고**하고 PASS로 세지 않는다.
+
+### V4. 진짜 인증과 2차 인증 (Phase C)
+
+- **회원가입·로그인:** 이메일·비밀번호·이름. 비밀번호는 Argon2id 해시(평문·약한 해시 금지). 시연 계정 비밀번호는 `.env` 값으로 시드한다.
+- **세션:** 서버 측 세션 토큰(무작위 256비트, DB에는 해시만 저장), 유휴 30분·절대 8시간 만료, 로그아웃 시 폐기. **httpOnly + SameSite=Strict 쿠키**로 전달(배포 시 Secure). 상태 변경 요청은 CSRF 토큰 헤더를 요구한다. 토큰을 localStorage에 두지 않는다.
+- **로그인 실패 제한(SC-07):** 진행 중인 `backend/throttle.py`를 로그인 엔드포인트에 연결한다. 클라이언트 주소 기준 + 계정 기준.
+- **송금 2차 인증(OTP, TOTP):** `POST /api/transfers`는 '송금 대기'를 만들고(5분 만료, 잔액 변경 없음), `POST /api/transfers/{id}/confirm`이 OTP를 **서버에서 검증한 뒤에만** 실행한다. 같은 OTP 재사용 거절. 대기 건은 만든 세션의 사용자만 확정 가능. 멱등성(request_id)은 유지한다. TOTP 시크릿은 `.env`의 키로 암호화해 저장하고 출력하지 않는다.
+- **SC-09 2차 인증 단계 건너뛰기(신규 핵심 시나리오).** 취약 구현: 서버가 OTP를 검증하지 않고 클라이언트가 보낸 확인 결과(`"otp_verified": true`)를 믿음 → OTP 없이 송금 실행 → FAIL. 안전 기준: OTP 없음·틀림·재사용 모두 거절, 송금 미실행, 잔액·기록 불변 → PASS. 양성 대조: 올바른 OTP로 확정 시 201. 매핑: CWE-841(업무 흐름 강제 미흡), CWE-287. 근거: 응답·파라미터 조작으로 MFA를 우회하는 사례는 버그바운티에서 반복 보고되는 유형.
+- **X-Demo-Token 제거:** 운영 경로에서 삭제한다. 기존 시나리오 하네스는 로그인 세션으로 옮기고, 테스트 편의용 로그인 헬퍼만 둔다.
+- 관리자 역할(지급정지)과 기존 SC-01·03·04·05·06은 새 인증 위에서 그대로 PASS/FAIL이 재현돼야 한다(회귀 테스트).
+
+### V5. React + TypeScript 화면 (Phase D)
+
+- **Figma로 화면을 먼저 정한다(수업 07강, 사람 작업).** 그다음 `frontend/`에 Vite + React + TypeScript(strict)로 구현한다. Streamlit 파일(`frontend/*.py`)과 관련 테스트는 React가 같은 정보를 보여준 것을 확인한 뒤 삭제한다.
+- **화면:** 로그인·회원가입, 내 계좌(원화 쉼표 표시), 거래내역, 송금(+OTP 확인), 계좌 별칭, 관리자 지급정지, **보안 점검 결과(관리자)**: 핵심 시나리오 전후 비교, SAST 결과, SAST↔동적 비교표, DET-01 경보, SCA 결과, 마지막 실행 시각. 결과가 없으면 "아직 검사를 실행하지 않았습니다".
+- **개발 환경:** Vite proxy로 `/api`를 FastAPI에 넘겨 같은 출처로 동작시킨다(쿠키 SameSite=Strict 유지). 배포 시 CORS는 정확한 출처 1개만 허용.
+- **프론트 보안 규칙:** `dangerouslySetInnerHTML` 금지, 토큰 저장소(localStorage·sessionStorage) 사용 금지, `VITE_*`에 비밀값 금지, 서버 오류 상세를 화면에 그대로 출력 금지.
+- **검증:** `npm run build`(타입 검사 `tsc --noEmit` 포함) 성공 + **사람이 브라우저에서 직접 확인**(Network 탭에서 Supabase 도메인 요청 0건 포함).
+
+### V6. 일정
+
+상세는 `docs/plan.md`. 요약: Phase A(SC-07·SCA 마무리, 수업 산출물 docs) → B(Supabase 전환, SC-08, PostgreSQL 경쟁 조건) → C(인증·OTP·SC-09) → D(Figma → React+TS) → E(통합·CI·README·발표 준비). 이후 남는 시간에 확장 X1~X4를 순서대로 한다. 각 Phase 끝에 **사람 화면 확인 + `docs/learning_log.md` 3줄 + 커밋**.
+
+### V7. 확장 목록 (Phase E 이후, 이 순서로)
+
+| ID | 내용 | 직무 연결 |
+|---|---|---|
+| X1 | **CSRF로 송금시키기(SC-10)·XSS 점검:** 취약 비교는 TestClient에서 CSRF 토큰 검사를 뺀 구현 | 웹 시큐어코딩 연구(CSRF)를 금융 맥락으로 확장 |
+| X2 | **이상거래 탐지 확장:** 가상 거래 트래픽(정상+공격) 생성, DET-02 무차별 로그인, DET-03 단시간 다수 송금, DET-04 첫 수취인 고액 송금, 탐지율·오탐률 측정 | 데이터분석보안 |
+| X3 | **점검 도구 고도화:** 정답 라벨 기반 Semgrep 정밀도·재현율, TypeScript용 Semgrep 규칙(토큰 저장소·`dangerouslySetInnerHTML`), 로컬 OWASP ZAP baseline | AppSec·DevSecOps |
+| X4 | **클라우드 배포:** 안전 모드만, 보안 헤더(CSP 등) 점검, 배포 환경에 점검 실행 경로 없음 확인 | 이후 클라우드 수업 연계 |
+
+### V8. v2.0 완료 기준
+
+- [ ] **필수 스택 4개가 실제로 동작:** React(TypeScript) 화면에서 로그인 → 송금(OTP) → 거래내역 확인, 데이터가 FastAPI를 거쳐 Supabase에 저장됨(Supabase Table Editor에서 확인)
+- [ ] 브라우저 Network 탭에 Supabase 도메인 요청 0건, 프론트 빌드 결과물에 Supabase 키·DB 접속 정보 없음(문자열 검색)
+- [ ] `npm run build` 성공, `pytest` 전체 통과(SQLite), `pytest -m postgres` 실제 실행 기록(SKIP 아님)
+- [ ] 핵심 시나리오 SC-01·03·04·05·06·09 취약 FAIL → 안전 PASS, SC-07 PASS, SC-08 PASS(시연 DB), 진단 보고서 갱신
+- [ ] CI: pytest + 보안 게이트 + 프론트 빌드·타입 검사 + `npm audit`(결과 기록, 실패 기준은 high 이상)
+- [ ] 수업 산출물 `docs/mvp.md`, `docs/prd.md`, `docs/spec.md`, `docs/plan.md` + `docs/learning_log.md`
+- [ ] README: 스택, 실행 방법(백엔드·프론트 터미널 2개 + `.env` 준비), 결과, 한계, AI 활용 내역 갱신
+- [ ] 각 Phase의 사람 화면 확인 기록
+
+### V9. 대체되는 v1.x 항목
+
+| v1.x | v2.0 |
+|---|---|
+| Streamlit 대시보드(10장, DAY 6) | React + TypeScript 화면(V5) |
+| `X-Demo-Token` 인증(6장) | 로그인 + 세션 쿠키 + 송금 OTP(V4). 테스트에서만 로그인 헬퍼 |
+| SQLite 운영 DB(3·5장) | Supabase PostgreSQL. SQLite는 테스트 전용(V3) |
+| 2장 "명시적 제외: React" | 삭제 |
+| 14장 "외부 API 키·인터넷 없이 완전 시연" | 시연은 Supabase 때문에 인터넷 필요. **pytest 기본 실행은 오프라인 유지** |
+| 13장 DAY 계획 | `docs/plan.md` Phase A~E + X1~X4 |
+| P1 "SC-07 무차별 대입" | 핵심 범위로 포함(V4) |
 
 ---
 

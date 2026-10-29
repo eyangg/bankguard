@@ -14,7 +14,7 @@ from backend.config import PROJECT_ROOT
 
 ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 ENV_DIR = "BANKGUARD_ARTIFACTS_DIR"  # 테스트가 사용자의 실제 결과 파일을 덮어쓰지 않도록 저장 위치를 바꾸는 설정
-KINDS = ("api_vulnerable", "api_secure", "sast", "det01")
+KINDS = ("api_vulnerable", "api_secure", "sast", "det01", "sca")  # sca: 의존성 점검(인터넷 필요, 별도 명령)
 
 
 def default_dir() -> Path:

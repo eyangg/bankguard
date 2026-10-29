@@ -14,13 +14,13 @@ tests/test_lab_diff_shape.py가 이 "결함 부분만 다르다"를 AST 비교�
 - 이 모듈은 vulnerable일 때만 지연 import된다. backend.main(공개 진입점)은 import하지 않는다.
 
 결함 목록: SC-01 BOLA · SC-02 금액 서버 검증 누락(T06·T07) · SC-03 lost update ·
-SC-04 멱등성 없음 · SC-05 BFLA · SC-06 Mass Assignment.
+SC-04 멱등성 없음 · SC-05 BFLA · SC-06 Mass Assignment · SC-07 인증 시도 횟수 제한 없음.
 """
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 from backend import audit, repository, routes
@@ -46,10 +46,12 @@ LAB_TAG = "INSECURE-LAB (검사 전용)"
 
 @dataclass(frozen=True)
 class LabSetup:
-    """결함 하나를 붙이는 데 필요한 것: 먼저 등록할 라우터와(필요할 때만) 전용 DB 스키마."""
+    """결함 하나를 붙이는 데 필요한 것: 먼저 등록할 라우터와(필요할 때만) 전용 DB 스키마·의존성 교체."""
 
     router: APIRouter
     schema_sql: str | None = None
+    # 결함이 라우트가 아니라 공통 의존성(인증)에 있을 때만 쓴다(SC-07). {안전 의존성: 취약 의존성}
+    dependency_overrides: dict = field(default_factory=dict)
 
 
 # ===== SC-01 BOLA ========================================================================
@@ -451,6 +453,33 @@ def _setup_int_amount() -> LabSetup:
     )
 
 
+# ===== SC-07 인증 시도 횟수 제한 없음 ========================================================
+# 실제 버그 패턴: 인증 실패를 세지 않아 토큰·코드를 무제한으로 추측할 수 있음(CWE-307, OWASP API2:2023).
+# 근거 사례: 2019-07 Instagram 모바일 비밀번호 재설정의 6자리 코드를 무차별 대입 가능, 시도 제한은 IP 분산·동시 요청으로 우회(Laxman Muthiyah 보고, The Hacker News·Security Affairs 보도).
+# 안전 코드와의 차이: auth_demo.current_user에서 시도 예약·잠금(429) 블록과 성공 시 예약 해제 한 줄을 삭제.
+def lab_current_user(
+    conn: sqlite3.Connection = Depends(get_conn),
+    x_demo_token: str | None = Header(default=None),
+) -> AuthUser:
+    fp = audit.token_fingerprint(x_demo_token)
+    user = repository.get_user_by_token(conn, x_demo_token) if x_demo_token else None
+    if user is None:
+        audit.record(
+            conn,
+            audit.AUTH_FAIL,
+            401,
+            token_fp=fp,
+            detail="토큰 없음" if not x_demo_token else "토큰 불일치",
+        )
+        raise HTTPException(status_code=401, detail="인증 토큰이 없거나 올바르지 않습니다.")
+    return AuthUser(user_id=user["id"], token_fp=fp, role=user["role"])
+
+
+def _setup_no_auth_limit() -> LabSetup:
+    # 라우트는 모두 안전 구현 그대로 두고, 모든 보호 경로가 쓰는 인증 의존성만 바꿔 끼운다.
+    return LabSetup(APIRouter(), dependency_overrides={current_user: lab_current_user})
+
+
 # 결함 ID → 설치 함수. 한 번에 하나만 붙는다.
 LAB_FLAWS = {
     "SC-01": _setup_bola,
@@ -459,6 +488,7 @@ LAB_FLAWS = {
     "SC-04": _setup_no_idempotency,
     "SC-05": _setup_bfla,
     "SC-06": _setup_mass_assignment,
+    "SC-07": _setup_no_auth_limit,
 }
 
 

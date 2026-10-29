@@ -24,6 +24,11 @@ DET01_WINDOW_MINUTES = 5
 DET01_MIN_DISTINCT_ACCOUNTS = 3
 DET01_EVENT_TYPES = ("ACCESS_DENIED", "NOT_FOUND")
 
+# SC-07 인증 시도 횟수 제한(명세 v2.0에서 핵심 범위). 같은 클라이언트가 최근 N초 안에 인증에 K번 실패하면 그 뒤 요청은 429로 거절한다.
+# 학습용 설정값이며 실제 트래픽으로 정한 값이 아니다. 한계(같은 IP를 쓰는 정상 사용자도 잠김 등)는 docs/limitations.md 참고.
+AUTH_MAX_FAILURES = 5
+AUTH_WINDOW_SECONDS = 300
+
 # 안전 모드 송금 금액 상한(원). 하한은 1원 (명세 5장 불변식)
 MAX_TRANSFER_KRW = 10_000_000
 

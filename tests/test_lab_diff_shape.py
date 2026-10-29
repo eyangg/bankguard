@@ -12,7 +12,7 @@ import textwrap
 
 import pytest
 
-from backend import routes, schemas
+from backend import auth_demo, routes, schemas
 from backend.services import insecure_lab as lab
 from backend.services import transfers
 
@@ -45,6 +45,7 @@ PAIRS = {
     "SC-06 route": (routes.update_account_nickname, lab.lab_update_account_nickname, 2),
     "SC-06 model": (schemas.NicknameUpdate, lab.NicknameUpdateLoose, 1),
     "SC-02 model": (schemas.TransferIn, lab.TransferInLoose, 1),
+    "SC-07 auth": (auth_demo.current_user, lab.lab_current_user, 2),
 }
 
 
@@ -105,8 +106,24 @@ def test_sc05_differs_from_secure_only_by_missing_router_dependency():
     assert setup.router.dependencies == []
 
 
+def test_sc07_only_removes_the_attempt_limit():
+    _, removed, added = diff_of(auth_demo.current_user, lab.lab_current_user)
+    body_removed = removed[1:]  # 첫 줄은 시그니처(request 인자 제거)
+    assert added == [removed[0].replace("request: Request, ", "")]
+    assert body_removed[0] == "attempt = throttle.reserve_attempt(conn, throttle.client_key(request))"
+    assert any("429" in line for line in body_removed)
+    assert body_removed[-1] == "throttle.release_attempt(conn, attempt)"
+    assert not any("AUTH_FAIL" in line or "get_user_by_token" in line for line in removed)  # 토큰 검사 자체는 동일
+
+
+def test_sc07_swaps_only_the_auth_dependency():
+    setup = lab.build_lab("SC-07")
+    assert setup.router.routes == []
+    assert setup.dependency_overrides == {auth_demo.current_user: lab.lab_current_user}
+
+
 def test_every_lab_flaw_has_a_registered_setup():
-    assert sorted(lab.LAB_FLAWS) == ["SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06"]
+    assert sorted(lab.LAB_FLAWS) == ["SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07"]
 
 
 def test_unknown_flaw_is_rejected():

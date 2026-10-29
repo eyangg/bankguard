@@ -1,6 +1,7 @@
 """고정 시나리오 실행기 (명세 12장).
 
 핵심 5종: SC-01 BOLA · SC-03 동시 송금 경쟁 조건 · SC-04 멱등성 · SC-05 BFLA · SC-06 Mass Assignment
+v2.0 핵심 추가: SC-07 인증 무차별 대입(시도 횟수 제한)
 세부 1종: SC-02(T06·T07 0원·음수 금액) — v1.2에서 핵심 집계에서 내려 'detail'로 표시한다.
 
 원칙
@@ -361,6 +362,71 @@ def _run_sc06(new_env: EnvFactory) -> Outcome:
     return Outcome(PASS, f"변형 {len(_SC06_VARIANTS)}개 모두 422, DB 불변", evidence)
 
 
+# --- SC-07 인증 무차별 대입 (시도 횟수 제한) ----------------------------------------------------
+
+# 문서용 예약 주소(RFC 5737 TEST-NET)라 실제 주소가 아니다. TestClient가 요청의 연결 주소로 쓴다.
+SC07_ATTACKER = ("203.0.113.10", 50000)
+SC07_OTHER_CLIENT = ("198.51.100.20", 50000)
+# 틀린 토큰 7개 뒤 8번째에 실제 존재하는 토큰(고객 C)을 맞히는 공격. 제한(5회)을 넘긴 뒤의 '정답'이 통하는지 본다.
+_SC07_GUESSES = tuple(f"demo-token-guess-{i:02d}" for i in range(1, 8)) + ("demo-token-c",)
+
+
+def _auth_client(env: IsolatedEnv, address: tuple[str, int]) -> TestClient:
+    return TestClient(env.app, raise_server_exceptions=False, client=address)
+
+
+def _run_sc07(new_env: EnvFactory) -> Outcome:
+    # 양성 대조: 제한보다 적게 틀린 뒤 맞는 토큰은 통과해야 한다(정상 사용자를 잘못 잠그지 않음).
+    with new_env() as env:
+        client = _auth_client(env, SC07_ATTACKER)
+        typo = [client.get("/api/accounts", headers={"X-Demo-Token": t}).status_code
+                for t in ("demo-token-typo-1", "demo-token-typo-2")]
+        ok = client.get("/api/accounts", headers={"X-Demo-Token": "demo-token-c"})
+        if typo != [401, 401] or ok.status_code != 200:
+            raise ControlFailed(f"제한 이하 실패 후 정상 로그인 대조 실패(HTTP {typo} → {ok.status_code})")
+
+    with new_env() as env:
+        attacker = _auth_client(env, SC07_ATTACKER)
+        responses = [attacker.get("/api/accounts", headers={"X-Demo-Token": t}) for t in _SC07_GUESSES]
+        # 양성 대조: 잠금은 공격 클라이언트에만 걸려야 한다(다른 클라이언트의 정상 사용자는 200).
+        other = _auth_client(env, SC07_OTHER_CLIENT).get("/api/accounts", headers=TOKEN_B)
+        counts = {
+            r["event_type"]: r["n"]
+            for r in env.query(
+                "SELECT event_type, COUNT(*) AS n FROM audit_log"
+                " WHERE event_type IN ('AUTH_FAIL', 'AUTH_LOCKED') GROUP BY event_type"
+            )
+        }
+
+    codes = [r.status_code for r in responses]
+    retry_after = [r.headers.get("Retry-After") for r in responses if r.status_code == 429]
+    evidence = (
+        f"공격 클라이언트(203.0.113.10)에서 틀린 토큰 7개 뒤 실제 토큰(고객 C) 순서로 GET /api/accounts → HTTP {codes}. "
+        f"429 응답의 Retry-After={retry_after or '없음'}. 감사로그 AUTH_FAIL={counts.get('AUTH_FAIL', 0)}건, "
+        f"AUTH_LOCKED={counts.get('AUTH_LOCKED', 0)}건. 다른 클라이언트(198.51.100.20)의 고객 B → HTTP {other.status_code}. "
+        "양성 대조: 2회 틀린 뒤 맞는 토큰은 200."
+    )
+    if any(c >= 500 for c in codes + [other.status_code]):
+        return Outcome(ERROR, f"서버 오류 HTTP {codes}: 결함 때문인지 판정 불가", evidence)
+    if codes[:5] != [401] * 5:
+        return Outcome(ERROR, f"틀린 토큰 5회가 모두 401이 아님 {codes[:5]}: 판정 불가", evidence)
+    if other.status_code != 200:
+        raise ControlFailed(f"다른 클라이언트의 정상 사용자가 차단됨(HTTP {other.status_code})")
+
+    guessed = codes[-1] == 200
+    limited = codes[5:] == [429] * (len(codes) - 5) and all(v and v.isdigit() for v in retry_after)
+    if limited and counts.get("AUTH_LOCKED", 0) == len(codes) - 5:
+        return Outcome(PASS, "5회 실패 뒤 6번째부터 429(Retry-After), 잠금 중 실제 토큰도 거절, 다른 클라이언트 정상", evidence)
+    if guessed or 401 in codes[5:]:
+        return Outcome(
+            FAIL,
+            f"제한 없이 추측 계속 가능: 6번째 이후 HTTP {codes[5:]}"
+            + (", 8번째 추측(실제 토큰)이 200으로 통과" if guessed else ""),
+            evidence,
+        )
+    return Outcome(ERROR, f"예상 밖 응답 HTTP {codes}: 판정 불가", evidence)
+
+
 # --- SC-02 (T06·T07) 잘못된 금액 -----------------------------------------------------------
 
 _SC02_AMOUNTS = (("T06", -10_000), ("T07", 0))
@@ -446,6 +512,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         description="요청 JSON이 바꿀 수 없는 속성(잔액·소유자·상태)까지 반영되지 않는지 검사한다.",
         fix_guide="입력 DTO에 허용 필드만 정의(extra=forbid)하고, DB 갱신은 명시한 컬럼만 대상으로 한다.",
         execute=_run_sc06,
+    ),
+    Scenario(
+        id="SC-07", name="인증 무차별 대입 차단 (시도 횟수 제한)", risk="HIGH", likelihood="L2", impact="I3",
+        # CWE 원문 명칭: 307 Improper Restriction of Excessive Authentication Attempts. OWASP API2:2023 Broken Authentication.
+        owasp="API2:2023", cwe="CWE-307",
+        expected="5회 실패 뒤 6번째 요청부터 429+Retry-After, 잠금 중엔 실제 토큰도 거절, 다른 클라이언트는 정상 200",
+        description="잘못된 토큰을 반복해 보내는 추측 공격을 서버가 횟수로 제한하는지 검사한다.",
+        fix_guide="클라이언트별 인증 실패를 세어 제한을 넘으면 일시 잠그고, 확인과 기록은 원자적으로(시도 선예약) 처리한다.",
+        execute=_run_sc07,
     ),
     Scenario(
         id="SC-02", name="잘못된 송금 금액 차단 (T06·T07, 0원·음수)", risk="HIGH", likelihood="L3", impact="I3",

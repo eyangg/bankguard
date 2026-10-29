@@ -2,7 +2,9 @@
 #   1) pytest 전체(동적 시나리오·정적 분석 통합 테스트·대시보드 포함)
 #   2) 보안 게이트: 안전 코드(backend/, insecure_lab.py 제외)에서 Semgrep 탐지가 있거나,
 #      안전 모드 핵심 시나리오가 하나라도 PASS가 아니거나, 도구 오류(SCAN_ERROR)가 나면 실패한다.
+#   3) (P1) pip-audit: 설치된 앱 의존성에 알려진 취약점이 있거나 점검이 불가능하면 실패한다(PyPI 조회).
 # Semgrep은 앱과 의존성이 충돌하므로 별도 가상환경(.venv-semgrep)에 설치한다(requirements-sast.txt 참고).
+# pip-audit도 점검 대상(앱 환경)을 오염시키지 않도록 별도 가상환경(.venv-sca)에 설치한다.
 name: security-check
 
 on:
@@ -33,6 +35,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-sast.txt
+            requirements-sca.txt
 
       - name: 앱·테스트 의존성 설치
         run: python -m pip install -r requirements.txt
@@ -43,8 +46,22 @@ jobs:
           .venv-semgrep/bin/python -m pip install -r requirements-sast.txt
           .venv-semgrep/bin/semgrep --version
 
+      - name: pip-audit 설치 (별도 가상환경, P1 SCA)
+        run: |
+          python -m venv .venv-sca
+          .venv-sca/bin/python -m pip install -r requirements-sca.txt
+
       - name: pytest
         run: python -m pytest -q
 
+      # 아래 두 단계는 pytest가 실패해도 실행한다(어느 검사가 무엇을 막았는지 단계별로 보이도록).
+      # 작업 전체는 어느 단계든 실패하면 실패로 끝난다.
       - name: 보안 게이트 (Semgrep + 안전 모드 시나리오)
+        if: ${{ !cancelled() }}
         run: python -m scanners.ci_gate
+
+      - name: 의존성 취약점 점검 (pip-audit, 알려진 취약점이 있으면 실패)
+        if: ${{ !cancelled() }}
+        env:
+          BANKGUARD_PIP_AUDIT_BIN: ${{ github.workspace }}/.venv-sca/bin/pip-audit
+        run: python -m scanners.sca_runner

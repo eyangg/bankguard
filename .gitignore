@@ -1,6 +1,7 @@
 # 가상환경
 .venv/
 .venv-semgrep/
+.venv-sca/
 venv/
 
 # Python 캐시

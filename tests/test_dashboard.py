@@ -197,14 +197,14 @@ def test_full_run_fills_every_section_and_saves_artifacts(app, tmp_path):
     state = app.session_state
     assert set(state["api_results"]) == {"vulnerable", "secure"}
     assert state["sast_run"] is not None and state["det01"] is not None
-    # ④ 비교: 핵심 5개 모두 개선 확인 (취약 FAIL → 안전 PASS가 실제로 둘 다 관측된 경우만)
-    assert metric_value(app, "비교 대상(핵심)") == "5"
-    assert metric_value(app, "개선 확인(FAIL→PASS)") == "5"
+    # ④ 비교: 핵심 6개(v1.x 5종 + SC-07) 모두 개선 확인 (취약 FAIL → 안전 PASS가 실제로 둘 다 관측된 경우만)
+    assert metric_value(app, "비교 대상(핵심)") == "6"
+    assert metric_value(app, "개선 확인(FAIL→PASS)") == "6"
     comparison_tables = [df for df in app.dataframe if "판정" in df.value.columns]
     assert all("개선 확인" in v for v in comparison_tables[0].value["판정"])
     # ④ SAST ↔ 동적 비교표
     coverage = next(df for df in app.dataframe if "Semgrep" in df.value.columns)
-    assert len(coverage.value) == 8
+    assert len(coverage.value) == 9  # 명세 8행 + SC-07
     row = coverage.value.set_index("결함").loc["BOLA(소유권 검사 누락)"]
     assert "취약 FAIL / 안전 PASS" in row["동적 테스트"] and "미탐지" in row["Semgrep"]
     # 보고서 미리보기와 저장
@@ -219,14 +219,14 @@ def test_secure_run_shows_all_pass_matching_session_data(app):
     app.button(key="run_api").click().run()
     assert not app.exception
     result = app.session_state["api_results"]["secure"]
-    assert [i["status"] for i in result["items"]] == ["PASS"] * 6
-    assert metric_value(app, "핵심 검사") == "5"
+    assert [i["status"] for i in result["items"]] == ["PASS"] * 7
+    assert metric_value(app, "핵심 검사") == "6"
     # 회귀 방지: ②탭에서 실행한 '그 클릭'에서 ①개요 요약도 바로 갱신돼야 한다(예전에는 한 번 늦게 갱신됨).
-    assert [m.value for m in app.metric if m.label == "핵심"] == ["5"]
-    assert metric_value(app, "보안 기준 통과") == "5"
+    assert [m.value for m in app.metric if m.label == "핵심"] == ["6"]
+    assert metric_value(app, "보안 기준 통과") == "6"
     assert metric_value(app, "취약 동작 확인") == "0"
     cards = [l for l in labels(app) if l.startswith("SC-")]
-    assert len(cards) == 6 and all("PASS" in c for c in cards)
+    assert len(cards) == 7 and all("PASS" in c for c in cards)
 
 
 def test_vulnerable_run_shows_fail_cards_expanded_with_evidence(app):
@@ -234,10 +234,10 @@ def test_vulnerable_run_shows_fail_cards_expanded_with_evidence(app):
     app.button(key="run_api").click().run()
     assert not app.exception
     result = app.session_state["api_results"]["vulnerable"]
-    assert [i["status"] for i in result["items"]] == ["FAIL"] * 6
-    assert metric_value(app, "취약 동작 확인") == "5"
+    assert [i["status"] for i in result["items"]] == ["FAIL"] * 7
+    assert metric_value(app, "취약 동작 확인") == "6"
     cards = [e for e in app.expander if e.label.startswith("SC-")]
-    assert len(cards) == 6 and all("FAIL" in c.label for c in cards)
+    assert len(cards) == 7 and all("FAIL" in c.label for c in cards)
     assert all(c.proto.expanded for c in cards)  # FAIL 카드는 처음부터 펼쳐 보여 준다
     assert any("3,500,000→3,800,000" in e.value for e in app.error)  # 실제 관측 근거가 그대로 표시됨
 
@@ -247,11 +247,11 @@ def test_both_modes_are_kept_and_summarized_in_overview(app):
         app.radio(key="api_mode").set_value(label).run()
         app.button(key="run_api").click().run()
     assert set(app.session_state["api_results"]) == {"vulnerable", "secure"}
-    # 개요 탭: 모드별 요약 카드가 둘 다 생기고, 각각 실제 결과 건수와 일치한다(취약 5건 FAIL / 안전 5건 PASS).
+    # 개요 탭: 모드별 요약 카드가 둘 다 생기고, 각각 실제 결과 건수와 일치한다(취약 6건 FAIL / 안전 6건 PASS).
     core_cards = [m for m in app.metric if m.label == "핵심"]
-    assert [m.value for m in core_cards] == ["5", "5"]
-    assert [m.value for m in app.metric if m.label == "취약"] == ["5", "0"]
-    assert [m.value for m in app.metric if m.label == "통과"] == ["0", "5"]
+    assert [m.value for m in core_cards] == ["6", "6"]
+    assert [m.value for m in app.metric if m.label == "취약"] == ["6", "0"]
+    assert [m.value for m in app.metric if m.label == "통과"] == ["0", "6"]
 
 
 def test_engine_exception_is_shown_as_error_not_as_fail_or_pass(app, monkeypatch):

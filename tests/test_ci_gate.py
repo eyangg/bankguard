@@ -157,3 +157,20 @@ def test_workflow_runs_pytest_then_the_gate(workflow):
     assert any(u.startswith("actions/checkout@") for u in uses) and any(u.startswith("actions/setup-python@") for u in uses)
     python_step = next(s for s in steps if s.get("uses", "").startswith("actions/setup-python@"))
     assert python_step["with"]["python-version"] == "3.12"
+
+
+def test_gate_and_sca_steps_run_even_if_pytest_fails(workflow):
+    # 의도적 실패 때 '어느 검사가 막았는지'가 단계별로 보여야 한다. 작업 전체의 실패 판정은 그대로다.
+    steps = {s.get("run"): s for s in workflow["jobs"]["security-gate"]["steps"] if "run" in s}
+    for command in ("python -m scanners.ci_gate", "python -m scanners.sca_runner"):
+        assert steps[command]["if"] == "${{ !cancelled() }}"
+        assert "continue-on-error" not in steps[command]  # 실패를 삼키지 않는다
+
+
+def test_sca_step_uses_a_separate_venv_and_points_the_runner_to_it(workflow):
+    steps = workflow["jobs"]["security-gate"]["steps"]
+    runs = "\n".join(s.get("run", "") for s in steps)
+    assert "python -m venv .venv-sca" in runs and "requirements-sca.txt" in runs
+    sca_step = next(s for s in steps if s.get("run") == "python -m scanners.sca_runner")
+    assert sca_step["env"]["BANKGUARD_PIP_AUDIT_BIN"].endswith("/.venv-sca/bin/pip-audit")
+    assert "pip-audit" not in (PROJECT_ROOT / "requirements.txt").read_text(encoding="utf-8")

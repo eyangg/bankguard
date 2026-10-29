@@ -1,4 +1,4 @@
-"""시나리오 판정 테스트 (DAY 3 + DAY 4): 핵심 5종 + 세부 SC-02(T06·T07).
+"""시나리오 판정 테스트 (DAY 3 + DAY 4 + SC-07): 핵심 5종 + SC-07 + 세부 SC-02(T06·T07).
 
 취약 비교 모드가 안전 기준을 어겨 FAIL이 나오는 것은 시연의 정상 기대치다(명세 12장).
 여기서는 '러너가 실제 응답/DB 상태로 올바르게 FAIL·PASS·ERROR를 판정하는가'를 검증한다.
@@ -13,8 +13,8 @@ from backend.auth_demo import require_admin
 from scanners.api_runner import IsolatedEnv, run_api_scenarios
 from scanners.models import ERROR, FAIL, PASS
 
-ALL_IDS = ["SC-01", "SC-03", "SC-04", "SC-05", "SC-06", "SC-02"]
-CORE_IDS = ["SC-01", "SC-03", "SC-04", "SC-05", "SC-06"]
+ALL_IDS = ["SC-01", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07", "SC-02"]
+CORE_IDS = ["SC-01", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07"]
 
 
 def statuses(result):
@@ -54,7 +54,7 @@ def test_result_dict_follows_common_model():
     data = run_api_scenarios("secure").to_dict()
     assert {"run_id", "run_at", "target", "mode", "total", "pass", "fail", "error", "skip", "items"} <= set(data)
     assert (data["mode"], data["total"], data["pass"], data["fail"], data["error"], data["skip"]) == (
-        "secure", 6, 6, 0, 0, 0,
+        "secure", 7, 7, 0, 0, 0,
     )
     item = data["items"][0]
     for key in ("id", "name", "risk", "status", "expected", "observed", "description", "fix_guide",

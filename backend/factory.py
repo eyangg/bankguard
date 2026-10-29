@@ -55,7 +55,7 @@ def create_app(
     Args:
         mode: "secure"(공개 가능) 또는 "vulnerable"(검사 전용, 임시 DB 필수).
         db_path: SQLite 파일 경로. 테스트는 임시 경로를 넘긴다.
-        flaw: vulnerable일 때 붙일 결함 ID("SC-01"~"SC-06") 하나. 결함을 섞어서 붙일 수 없다.
+        flaw: vulnerable일 때 붙일 결함 ID("SC-01"~"SC-07") 하나. 결함을 섞어서 붙일 수 없다.
     """
     if mode not in SUPPORTED_MODES:
         raise ValueError(f"지원하지 않는 모드입니다: {mode!r}")
@@ -90,6 +90,7 @@ def create_app(
         # 먼저 등록한 경로가 우선하므로, 취약 라우터가 같은 경로의 안전 라우트를 가린다.
         # 취약 라우터에 없는 경로(계좌 목록 등)는 아래 안전 라우터가 그대로 처리한다.
         app.include_router(setup.router)
+        app.dependency_overrides.update(setup.dependency_overrides)  # SC-07: 인증 의존성 교체(그 외 결함은 비어 있음)
     app.include_router(router)
     app.include_router(admin_router)
 

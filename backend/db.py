@@ -47,6 +47,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
     http_status       INTEGER NOT NULL,
     detail            TEXT NULL
 );
+
+-- SC-07: 아직 성공으로 확인되지 않은 인증 시도. 인증에 성공하면 해당 행을 지우므로 남은 행이 곧 실패 횟수다.
+CREATE TABLE IF NOT EXISTS auth_attempts (
+    id         INTEGER PRIMARY KEY,
+    client_key TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_attempts_client ON auth_attempts (client_key, created_at);
 """
 
 

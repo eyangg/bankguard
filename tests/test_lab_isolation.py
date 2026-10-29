@@ -12,7 +12,7 @@ from backend.config import DEFAULT_DB_PATH, PUBLIC_MODES
 from backend.factory import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ALL_FLAWS = ["SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06"]
+ALL_FLAWS = ["SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07"]
 LAB_TAG = "INSECURE-LAB (검사 전용)"
 
 
@@ -76,9 +76,17 @@ def test_vulnerable_app_mounts_only_the_selected_flaw(tmp_path, flaw):
         "SC-04": {("POST", "/api/transfers")},
         "SC-05": {("POST", "/api/admin/accounts/{account_id}/freeze")},
         "SC-06": {("PATCH", "/api/accounts/{account_id}")},
+        "SC-07": set(),  # 경로는 붙이지 않고 인증 의존성만 바꾼다(아래 테스트)
     }[flaw]
     mounted = {(m, r.path) for r in lab_routes for m in r.methods}
     assert mounted == expected  # 다른 결함의 경로는 하나도 붙지 않는다
+    from backend.auth_demo import current_user
+
+    assert (current_user in app.dependency_overrides) == (flaw == "SC-07")  # 인증 교체는 SC-07에서만
+
+
+def test_secure_app_has_no_dependency_overrides():
+    assert create_app(mode="secure").dependency_overrides == {}
 
 
 def test_public_entrypoint_never_imports_lab_module():
