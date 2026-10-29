@@ -122,7 +122,7 @@ def _sanitize(text: str, limit: int = 600) -> str:
 
 
 def _relative_posix(raw_path: str) -> str:
-    path = Path(raw_path)
+    path = Path(raw_path.replace("\\", "/"))  # Linux의 Path는 역슬래시를 구분자로 보지 않는다
     if path.is_absolute():
         try:
             path = path.resolve().relative_to(PROJECT_ROOT.resolve())
